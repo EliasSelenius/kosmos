@@ -1,0 +1,165 @@
+include "../grax/grax.pog";
+include "src/deferred_renderer.pog";
+include "src/entity.pog";
+
+// ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll
+// ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O0 -g -fsanitize=address -fno-omit-frame-pointer
+
+/*
+    - point light
+    - spot light
+    - area light
+    - bloom
+    - marching cubes
+*/
+
+Camera player_camera = make_camera(90 * deg2rad, 0.1, 1000);
+
+DrawBuffers db_SpaceShip;
+
+void load_assets() {
+    DrawBuffers load_drawable(char* name) {
+        OBJ_Data obj = load_obj(name);
+        // Mesh mesh = obj_to_flatshaded_mesh(obj);
+        Mesh mesh = obj_to_mesh(obj);
+        free_obj(obj);
+        gen_normals(mesh);
+        DrawBuffers db = create_draw_buffers(mesh);
+
+        list_delete(mesh.vertices);
+        free(mesh.indices);
+        return db;
+    }
+
+
+    db_SpaceShip = load_drawable("../shared_assets/space/SpaceShip.obj");
+}
+
+enum GameViewMode { World; Tactical; FreeCam; }
+GameViewMode game_view_mode = .World;
+
+void main() {
+    grax_init();
+    load_assets();
+
+    let renderer = deferred_renderer_init();
+    let R = *renderer;
+
+    player_spaceship = {};
+    player_spaceship.tr = transform_default();
+    player_spaceship.rb.mass = 1;
+
+    player_camera.transform.position = { 20, 30, 0 };
+
+    while grax_loop() {
+        float32 dt = deltatime();
+
+        switch (game_view_mode) {
+            case .World: {
+
+                if key(GLFW_KEY_LEFT_ALT) {
+                    enable_cursor();
+                } else {
+                    disable_cursor();
+                }
+
+                {
+                    update_spaceship(*player_spaceship);
+
+                    mat4 m = to_matrix(player_spaceship.tr);
+                    let forward = xyz(m.row3);
+                    let left    = xyz(m.row1);
+                    let up      = xyz(m.row2);
+
+                    let force = forward * Input.wasd.y;
+                    add_force(*player_spaceship.rb, force);
+
+                    float32 turn_speed = 0.05;
+                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(up      * Input.mouse_pos_delta.x,            vec3_zero));
+                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(left    * Input.mouse_pos_delta.y,            vec3_zero));
+                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(forward * input_axis(GLFW_KEY_D, GLFW_KEY_A), vec3_zero));
+
+                    look_at(*player_camera.transform, player_spaceship.tr.position + forward * 10, up);
+                    player_camera.transform.position = exp_decay(player_camera.transform.position, player_spaceship.tr.position - forward * 30, 1, dt);
+                }
+
+                draw_world(R, player_camera);
+
+                if key(GLFW_KEY_SPACE) game_view_mode = .Tactical;
+                if key(GLFW_KEY_ENTER) game_view_mode = .FreeCam;
+            } break;
+
+            case .Tactical: {
+                static Camera cam = make_camera(90 * deg2rad, 0.1, 1000);
+
+                // TODO: compiler crash when static variable is not assigned
+                static vec3 target_yaw_pitch_zoom = {0, 0, 100};
+                static vec3 current_yaw_pitch_zoom = {};
+
+                current_yaw_pitch_zoom = exp_decay(current_yaw_pitch_zoom, target_yaw_pitch_zoom, 10, dt);
+
+                target_yaw_pitch_zoom.z -= target_yaw_pitch_zoom.z * 0.15 * Input.mouse_scroll;
+                target_yaw_pitch_zoom.z = max(target_yaw_pitch_zoom.z, 0.0001);
+
+
+                enable_cursor();
+                if mouse(Right_Mouse) {
+                    // disable_cursor();
+                    target_yaw_pitch_zoom.x += Input.mouse_pos_delta.x;
+                    const range = Half_Pi - 0.001;
+                    target_yaw_pitch_zoom.y = clamp(target_yaw_pitch_zoom.y - Input.mouse_pos_delta.y, -range, range);
+                }
+
+                float32 yaw   = current_yaw_pitch_zoom.x;
+                float32 pitch = current_yaw_pitch_zoom.y;
+                float32 zoom  = current_yaw_pitch_zoom.z;
+
+                let c = cosf(pitch);
+                cam.transform.position = { cosf(yaw) * c, sinf(pitch), sinf(yaw) * c } * zoom;
+                cam.transform.position = cam.transform.position + player_spaceship.tr.position;
+                look_at(*cam.transform, player_spaceship.tr.position);
+
+                draw_world(R, cam);
+            } break;
+
+            case .FreeCam: {
+                enable_cursor();
+                camera_fly_control(*player_camera);
+                draw_world(R, player_camera);
+                if key(GLFW_KEY_ENTER) game_view_mode = .World;
+            } break;
+        }
+    }
+}
+
+void draw_world(DeferredRenderer* R, Camera cam) {
+    begin_geometry_pass(R, cam);
+    draw_geometry(R, db_SpaceShip, player_spaceship.tr);
+
+    for 0 .. list_length(entities) {
+        let en = entities[it];
+        if en.is_alive  draw_geometry(R, en.db, en.tr);
+    }
+
+    begin_light_pass(R);
+    end_frame(R);
+}
+
+Spaceship player_spaceship;
+
+struct Spaceship {
+    with Transform tr;
+    with Rigidbody rb;
+}
+
+void update_spaceship(Spaceship* ship) {
+    float32 dt = deltatime();
+
+    float32 damp_factor = 1.0;
+    ship.rb.velocity = ship.rb.velocity - ship.rb.velocity * damp_factor * dt;
+
+    float32 angular_damp = 1;
+    ship.rb.angular_velocity = ship.rb.angular_velocity - ship.rb.angular_velocity * angular_damp * dt;
+
+    update_rigidbody_transform(*ship.tr, *ship.rb, dt);
+}

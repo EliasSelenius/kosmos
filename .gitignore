@@ -1,0 +1,6 @@
+*.exe
+*.exp
+*.g.c
+output.lib
+*.pdb
+shader_debug_log_*.txt

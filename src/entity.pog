@@ -1,0 +1,43 @@
+
+enum EntityType {
+    none;
+    spaceship;
+}
+
+struct Entity {
+    EntityType entity_type;
+
+    // TODO: flags
+    bool is_alive;
+
+    with Transform tr;
+    with Rigidbody rb;
+
+    DrawBuffers db;
+}
+
+Entity* entities = list_create(sizeof Entity);
+
+Entity* entity_spawn() {
+    for 0 .. list_length(entities) {
+        Entity* en = *entities[it];
+        if en.is_alive == false {
+            @en = {};
+            en.is_alive = true;
+            return en;
+        }
+    }
+
+    Entity en = {};
+    en.is_alive = true;
+    return list_add(*entities, *en);
+}
+
+void entity_despawn(Entity* en) {
+    @en = {};
+}
+
+enum ItemType {
+    Stone; IronOre; GoldOre; SiliconOre; IronIngot; MAX;
+}
+
