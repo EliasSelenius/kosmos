@@ -14,6 +14,7 @@ include "src/entity.pog";
 */
 
 Camera player_camera = make_camera(90 * deg2rad, 0.1, 1000);
+Entity* player_spaceship;
 
 DrawBuffers db_SpaceShip;
 
@@ -40,16 +41,24 @@ GameViewMode game_view_mode = .World;
 
 void main() {
     grax_init();
+    gizmo_setup();
     load_assets();
 
     let renderer = deferred_renderer_init();
     let R = *renderer;
 
-    player_spaceship = {};
-    player_spaceship.tr = transform_default();
-    player_spaceship.rb.mass = 1;
+    player_spaceship = entity_spawn();
+    player_spaceship.db = db_SpaceShip;
 
     player_camera.transform.position = { 20, 30, 0 };
+
+
+    int32 seed = 0;
+    for 0 .. 100 {
+        let en = entity_spawn();
+        en.db = db_SpaceShip;
+        en.tr.position = { random(seed++), random(seed++), random(seed++) } * 100;
+    }
 
     while grax_loop() {
         float32 dt = deltatime();
@@ -64,8 +73,6 @@ void main() {
                 }
 
                 {
-                    update_spaceship(*player_spaceship);
-
                     mat4 m = to_matrix(player_spaceship.tr);
                     let forward = xyz(m.row3);
                     let left    = xyz(m.row1);
@@ -84,9 +91,10 @@ void main() {
                 }
 
                 draw_world(R, player_camera);
+                update_world();
 
-                if key(GLFW_KEY_SPACE) game_view_mode = .Tactical;
-                if key(GLFW_KEY_ENTER) game_view_mode = .FreeCam;
+                if key_pressed(GLFW_KEY_SPACE) game_view_mode = .Tactical;
+                if key_pressed(GLFW_KEY_ENTER) game_view_mode = .FreeCam;
             } break;
 
             case .Tactical: {
@@ -102,13 +110,16 @@ void main() {
                 target_yaw_pitch_zoom.z = max(target_yaw_pitch_zoom.z, 0.0001);
 
 
+                float32 range = Half_Pi - 0.1;
                 enable_cursor();
                 if mouse(Right_Mouse) {
                     // disable_cursor();
                     target_yaw_pitch_zoom.x += Input.mouse_pos_delta.x;
-                    const range = Half_Pi - 0.001;
-                    target_yaw_pitch_zoom.y = clamp(target_yaw_pitch_zoom.y - Input.mouse_pos_delta.y, -range, range);
+                    target_yaw_pitch_zoom.y -= Input.mouse_pos_delta.y;
+                    range = Half_Pi - 0.001;
                 }
+
+                target_yaw_pitch_zoom.y = clamp(target_yaw_pitch_zoom.y, -range, range);
 
                 float32 yaw   = current_yaw_pitch_zoom.x;
                 float32 pitch = current_yaw_pitch_zoom.y;
@@ -120,46 +131,53 @@ void main() {
                 look_at(*cam.transform, player_spaceship.tr.position);
 
                 draw_world(R, cam);
+                update_world();
+
+                if key_pressed(GLFW_KEY_SPACE) game_view_mode = .World;
+                if key_pressed(GLFW_KEY_ENTER) game_view_mode = .FreeCam;
             } break;
 
             case .FreeCam: {
+                static Camera free_cam = make_camera(90 * deg2rad, 0.1, 1000);
                 enable_cursor();
-                camera_fly_control(*player_camera);
-                draw_world(R, player_camera);
-                if key(GLFW_KEY_ENTER) game_view_mode = .World;
+                camera_fly_control(*free_cam);
+                draw_world(R, free_cam);
+                if key_pressed(GLFW_KEY_ENTER) game_view_mode = .World;
             } break;
         }
+
+        gizmo_dispatch();
     }
 }
 
 void draw_world(DeferredRenderer* R, Camera cam) {
     begin_geometry_pass(R, cam);
-    draw_geometry(R, db_SpaceShip, player_spaceship.tr);
 
-    for 0 .. list_length(entities) {
+    for 0 .. entities_count {
         let en = entities[it];
         if en.is_alive  draw_geometry(R, en.db, en.tr);
     }
+
+    {
+        update_matrices(*cam); // TODO: we are calling this twice per frame
+
+        let pixel = read_pixel(mouse_x as int32, app.window_height as int32 - mouse_y as int32);
+        pixel.w = 1;
+
+        let inv_view = transpose(cam.view);
+        vec3 pos = xyz(mul(pixel, inv_view)) + cam.transform.position;
+
+        gizmo_point(pos, Green);
+    }
+
 
     begin_light_pass(R);
     end_frame(R);
 }
 
-Spaceship player_spaceship;
-
-struct Spaceship {
-    with Transform tr;
-    with Rigidbody rb;
-}
-
-void update_spaceship(Spaceship* ship) {
-    float32 dt = deltatime();
-
-    float32 damp_factor = 1.0;
-    ship.rb.velocity = ship.rb.velocity - ship.rb.velocity * damp_factor * dt;
-
-    float32 angular_damp = 1;
-    ship.rb.angular_velocity = ship.rb.angular_velocity - ship.rb.angular_velocity * angular_damp * dt;
-
-    update_rigidbody_transform(*ship.tr, *ship.rb, dt);
+void update_world() {
+    for 0 .. entities_count {
+        let en = *entities[it];
+        if en.is_alive  entity_update(en);
+    }
 }

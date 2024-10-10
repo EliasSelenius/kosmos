@@ -16,10 +16,11 @@ struct Entity {
     DrawBuffers db;
 }
 
-Entity* entities = list_create(sizeof Entity);
+Entity[1024] entities;
+uint32 entities_count;
 
 Entity* entity_spawn() {
-    for 0 .. list_length(entities) {
+    for 0 .. entities_count {
         Entity* en = *entities[it];
         if en.is_alive == false {
             @en = {};
@@ -28,13 +29,29 @@ Entity* entity_spawn() {
         }
     }
 
-    Entity en = {};
+    Entity* en = *entities[entities_count++];
+    @en = {};
     en.is_alive = true;
-    return list_add(*entities, *en);
+    en.tr = transform_default();
+    en.rb.mass = 1;
+
+    return en;
 }
 
 void entity_despawn(Entity* en) {
     @en = {};
+}
+
+void entity_update(Entity* en) {
+    float32 dt = deltatime();
+
+    float32 damp_factor = 1.0;
+    en.rb.velocity = en.rb.velocity - en.rb.velocity * damp_factor * dt;
+
+    float32 angular_damp = 1;
+    en.rb.angular_velocity = en.rb.angular_velocity - en.rb.angular_velocity * angular_damp * dt;
+
+    update_rigidbody_transform(*en.tr, *en.rb, dt);
 }
 
 enum ItemType {
