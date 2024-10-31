@@ -1,5 +1,4 @@
 include "../grax/grax.pog";
-include "src/deferred_renderer.pog";
 include "src/entity.pog";
 
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll
