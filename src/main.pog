@@ -150,52 +150,18 @@ void main() {
 }
 
 void draw_world(DeferredRenderer* R, Camera cam) {
+
+    let time = app.total_run_time / 5.0;
+    R.sun_dir = { cos(time), 0, sin(time) };
+    float32 sr = 15;
+    R.sun_radiance = { sr, sr, sr };
+
     begin_geometry_pass(R, cam);
 
     for 0 .. entities_count {
         let en = entities[it];
         if en.is_alive  draw_geometry(R, en.db, en.tr);
     }
-
-    {
-
-        static vec3[..] points = list_create(sizeof vec3);
-
-        update_matrices(*cam); // TODO: we are calling this twice per frame
-
-
-        int32 x = mouse_x as int32;
-        int32 y = app.window_height as int32 - mouse_y as int32;
-
-        let pixel = read_pixel(x, y, 0);
-        pixel.w = 1;
-
-        vec3 pos = xyz(mul(cam.view, pixel)) + cam.transform.position;
-
-        pixel = read_pixel(x, y, 1);
-        pixel.w = 1;
-
-        vec3 normal = xyz(mul(cam.view, pixel));
-
-        gizmo_point(pos, Green);
-        uint32 count = 6;
-        for 1 .. count+1 {
-            float32 s = it / count as float32;
-            gizmo_point(pos + normal * s, Yellow, 0.1 * s);
-
-        }
-
-
-
-        if mouse(Left_Mouse) {
-            list_add(*points, *pos);
-        }
-
-        for 0 .. list_length(points) {
-            gizmo_point(points[it], Cyan);
-        }
-    }
-
 
     begin_light_pass(R);
     end_frame(R);
