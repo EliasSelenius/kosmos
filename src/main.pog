@@ -155,6 +155,7 @@ void draw_world(DeferredRenderer* R, Camera cam) {
     R.sun_dir = { cos(time), 0, sin(time) };
     float32 sr = 15;
     R.sun_radiance = { sr, sr, sr };
+    R.sun_ambient_factor = 0.05;
 
     begin_geometry_pass(R, cam);
 
