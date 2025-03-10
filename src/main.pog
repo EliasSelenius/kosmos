@@ -1,6 +1,8 @@
 include "../grax/grax.pog";
 include "src/entity.pog";
 
+include "../grax/src/marching_cubes.pog";
+
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O0 -g -fsanitize=address -fno-omit-frame-pointer
 
@@ -16,6 +18,8 @@ Camera player_camera = make_camera(90 * deg2rad, 0.1, 1000);
 Entity* player_spaceship;
 
 DrawBuffers db_SpaceShip;
+
+MarCubesChunk test_chunk;
 
 void load_assets() {
     DrawBuffers load_drawable(char* name) {
@@ -51,6 +55,8 @@ void main() {
 
     player_camera.transform.position = { 20, 30, 0 };
 
+    test_chunk = init_mar_cubes_chunk(32);
+
 
     int32 seed = 0;
     for 0 .. 100 {
@@ -81,8 +87,8 @@ void main() {
                     add_force(*player_spaceship.rb, force);
 
                     float32 turn_speed = 0.05;
-                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(up      * Input.mouse_pos_delta.x,            vec3_zero));
-                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(left    * Input.mouse_pos_delta.y,            vec3_zero));
+                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(up      * Input.mouse_delta.x,            vec3_zero));
+                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(left    * Input.mouse_delta.y,            vec3_zero));
                     add_torque(*player_spaceship.rb, turn_speed * normalize_or(forward * input_axis(GLFW_KEY_D, GLFW_KEY_A), vec3_zero));
 
                     look_at(*player_camera.transform, player_spaceship.tr.position + forward * 10, up);
@@ -113,8 +119,8 @@ void main() {
                 enable_cursor();
                 if mouse(Right_Mouse) {
                     // disable_cursor();
-                    target_yaw_pitch_zoom.x += Input.mouse_pos_delta.x;
-                    target_yaw_pitch_zoom.y -= Input.mouse_pos_delta.y;
+                    target_yaw_pitch_zoom.x += Input.mouse_delta.x;
+                    target_yaw_pitch_zoom.y -= Input.mouse_delta.y;
                     range = Half_Pi - 0.001;
                 }
 
@@ -141,6 +147,9 @@ void main() {
                 enable_cursor();
                 camera_fly_control(*free_cam);
                 draw_world(R, free_cam);
+
+                debug_draw_grid(*test_chunk);
+
                 if key_pressed(GLFW_KEY_ENTER) game_view_mode = .World;
             } break;
         }
