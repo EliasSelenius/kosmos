@@ -2,6 +2,7 @@
 enum EntityType {
     none;
     spaceship;
+    asteroid;
 }
 
 struct Entity {

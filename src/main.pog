@@ -3,7 +3,7 @@ include "src/entity.pog";
 
 include "../grax/src/marching_cubes.pog";
 
-// ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll
+// ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O3
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O0 -g -fsanitize=address -fno-omit-frame-pointer
 
 /*
@@ -11,32 +11,20 @@ include "../grax/src/marching_cubes.pog";
     - spot light
     - area light
     - bloom
-    - marching cubes
 */
 
 Camera player_camera = make_camera(90 * deg2rad, 0.1, 1000);
 Entity* player_spaceship;
 
 DrawBuffers db_SpaceShip;
+DrawBuffers db_billboard;
 
-MarCubesChunk test_chunk;
+Batch_Of_Points ambient_particles;
 
 void load_assets() {
-    DrawBuffers load_drawable(char* name) {
-        OBJ_Data obj = load_obj(name);
-        // Mesh mesh = obj_to_flatshaded_mesh(obj);
-        Mesh mesh = obj_to_mesh(obj);
-        free_obj(obj);
-        gen_normals(mesh);
-        DrawBuffers db = create_draw_buffers(mesh);
-
-        list_delete(mesh.vertices);
-        free(mesh.indices);
-        return db;
-    }
-
-
     db_SpaceShip = load_drawable("../shared_assets/space/SpaceShip.obj");
+
+    // db_billboard = create_draw_buffer();
 }
 
 enum GameViewMode { World; Tactical; FreeCam; }
@@ -50,16 +38,45 @@ void main() {
     let renderer = deferred_renderer_init();
     let R = *renderer;
 
+    ambient_particles = create_batch_of_points();
+
     player_spaceship = entity_spawn();
     player_spaceship.db = db_SpaceShip;
 
     player_camera.transform.position = { 20, 30, 0 };
 
-    test_chunk = init_mar_cubes_chunk(32);
+
+    for 0 .. asteroid_count {
+        Asteroid* a = *asteroids[it];
+        a.mc = init_mar_cubes_chunk(64);
+
+        uint32 s = a.mc.size;
+        for z:0..s for y:0..s for x:0..s {
+
+            float32 half = s / 2.0;
+            let pos = make_vec(x, y, z) - make_vec3(half);
+
+            let h = (gnoise(noz(pos)*3)+1)/2;
+
+            let radius = length(pos) + h*20;
+
+            float32 v = (gnoise(pos/10.0)+1)/2;
+            if v > 0.4 and radius < half*0.8   v = 1.0;
+            else v = 0.0;
+            a.mc.data[get_index(s, x, y, z)] = v;
+        }
+
+        march_cubes(*a.mc);
+        a.mc.db = create_draw_buffers(a.mc.mesh);
+
+        a.tr = transform_default();
+        a.tr.scale = make_vec3(4);
+        a.tr.position = { random(), 0, random() } * 200;
+    }
 
 
     int32 seed = 0;
-    for 0 .. 100 {
+    for 0 .. 3 {
         let en = entity_spawn();
         en.db = db_SpaceShip;
         en.tr.position = { random(seed++), random(seed++), random(seed++) } * 100;
@@ -67,6 +84,24 @@ void main() {
 
     while grax_loop() {
         float32 dt = deltatime();
+
+        uint32 size = 4;
+        uint32 count = size*size*size;
+        uint32 count1 = (size+1)*(size+1)*(size+1);
+        for 0 .. count1 {
+            gizmo_point(make_vec(get_xyz(size+1, it)), Green);
+        }
+        for 0 .. count*3 {
+            uint32 group = it / count;
+            int32 index = it % count;
+            vec3[] offsets = {
+                {0.5, 0, 0},
+                {0, 0.5, 0},
+                {0, 0, 0.5}
+            };
+            let p = make_vec(get_xyz(size, index));
+            gizmo_point(p + offsets[group], Purple, 0.04);
+        }
 
         switch (game_view_mode) {
             case .World: {
@@ -86,56 +121,36 @@ void main() {
                     let force = forward * Input.wasd.y;
                     add_force(*player_spaceship.rb, force);
 
-                    float32 turn_speed = 0.05;
-                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(up      * Input.mouse_delta.x,            vec3_zero));
-                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(left    * Input.mouse_delta.y,            vec3_zero));
-                    add_torque(*player_spaceship.rb, turn_speed * normalize_or(forward * input_axis(GLFW_KEY_D, GLFW_KEY_A), vec3_zero));
+                    float32 turn_speed = 2 * dt;
+                    add_torque(*player_spaceship.rb, turn_speed * noz(up      * Input.mouse_delta.x));
+                    add_torque(*player_spaceship.rb, turn_speed * noz(left    * Input.mouse_delta.y));
+                    add_torque(*player_spaceship.rb, turn_speed * noz(forward * input_axis(GLFW_KEY_D, GLFW_KEY_A)));
 
-                    look_at(*player_camera.transform, player_spaceship.tr.position + forward * 10, up);
-                    player_camera.transform.position = exp_decay(player_camera.transform.position, player_spaceship.tr.position - forward * 30, 1, dt);
+                    let look_pos = player_spaceship.tr.position + forward * 30;
+                    look_at(*player_camera.transform, look_pos, up);
+
+                    gizmo_point(look_pos, Cyan, 0.5);
+                    gizmo_point(player_spaceship.tr.position + forward * 60, Cyan, 0.5);
+
+                    vec3 cam_target = player_spaceship.tr.position - forward * 30;
+                    player_camera.transform.position = exp_decay(player_camera.transform.position, cam_target, 2, dt);
                 }
 
                 draw_world(R, player_camera);
                 update_world();
 
-                if key_pressed(GLFW_KEY_SPACE) game_view_mode = .Tactical;
+                if key_pressed(GLFW_KEY_SPACE) {
+                    game_view_mode = .Tactical;
+                    player_camera.transform.position = player_spaceship.tr.position;
+                }
                 if key_pressed(GLFW_KEY_ENTER) game_view_mode = .FreeCam;
             } break;
 
             case .Tactical: {
-                static Camera cam = make_camera(90 * deg2rad, 0.1, 1000);
+                // static Camera cam = make_camera(90 * deg2rad, 0.1, 1000);
+                camera_orbit_control(*player_camera, player_spaceship.tr.position);
 
-                // TODO: compiler crash when static variable is not assigned
-                static vec3 target_yaw_pitch_zoom = {0, 0, 100};
-                static vec3 current_yaw_pitch_zoom = {};
-
-                current_yaw_pitch_zoom = exp_decay(current_yaw_pitch_zoom, target_yaw_pitch_zoom, 10, dt);
-
-                target_yaw_pitch_zoom.z -= target_yaw_pitch_zoom.z * 0.15 * Input.mouse_scroll;
-                target_yaw_pitch_zoom.z = max(target_yaw_pitch_zoom.z, 0.0001);
-
-
-                float32 range = Half_Pi - 0.1;
-                enable_cursor();
-                if mouse(Right_Mouse) {
-                    // disable_cursor();
-                    target_yaw_pitch_zoom.x += Input.mouse_delta.x;
-                    target_yaw_pitch_zoom.y -= Input.mouse_delta.y;
-                    range = Half_Pi - 0.001;
-                }
-
-                target_yaw_pitch_zoom.y = clamp(target_yaw_pitch_zoom.y, -range, range);
-
-                float32 yaw   = current_yaw_pitch_zoom.x;
-                float32 pitch = current_yaw_pitch_zoom.y;
-                float32 zoom  = current_yaw_pitch_zoom.z;
-
-                let c = cosf(pitch);
-                cam.transform.position = { cosf(yaw) * c, sinf(pitch), sinf(yaw) * c } * zoom;
-                cam.transform.position = cam.transform.position + player_spaceship.tr.position;
-                look_at(*cam.transform, player_spaceship.tr.position);
-
-                draw_world(R, cam);
+                draw_world(R, player_camera);
                 update_world();
 
                 if key_pressed(GLFW_KEY_SPACE) game_view_mode = .World;
@@ -148,7 +163,18 @@ void main() {
                 camera_fly_control(*free_cam);
                 draw_world(R, free_cam);
 
-                debug_draw_grid(*test_chunk);
+                // debug_draw_grid(*test_chunk);
+
+                update_matrices(*free_cam);
+                gizmo_transform(*player_spaceship.tr, free_cam);
+
+                if mouse_pressed(Left_Mouse) {
+                    ray_start = free_cam.transform.position;
+                    let ray = camera_ray(free_cam, Input.mouse_pos);
+                    ray_end = ray_start + ray*100;
+                }
+
+                gizmo_line(ray_start, ray_end, Green);
 
                 if key_pressed(GLFW_KEY_ENTER) game_view_mode = .World;
             } break;
@@ -158,22 +184,67 @@ void main() {
     }
 }
 
+vec3 ray_start;
+vec3 ray_end;
+
+struct Cloud {
+    vec3 pos;
+}
+
+struct Asteroid {
+    Transform tr;
+    MarCubesChunk mc;
+}
+
+uint32 asteroid_count = 1;
+Asteroid[1024] asteroids;
+
 void draw_world(DeferredRenderer* R, Camera cam) {
 
     let time = app.total_run_time / 5.0;
     R.sun_dir = { cos(time), 0, sin(time) };
     float32 sr = 15;
     R.sun_radiance = { sr, sr, sr };
-    R.sun_ambient_factor = 0.05;
+    R.sun_ambient_factor = 0.005;
 
     begin_geometry_pass(R, cam);
 
     for 0 .. entities_count {
         let en = entities[it];
-        if en.is_alive  draw_geometry(R, en.db, en.tr);
+        if en.is_alive  draw_geometry(R, en.db, to_matrix(en.tr));
     }
 
+    for 0 .. asteroid_count {
+        Asteroid* a = *asteroids[it];
+        draw_geometry(R, a.mc.db, to_matrix(a.tr));
+    }
+
+
     begin_light_pass(R);
+
+    float32 size = 10;
+    vec3 center = round2multiple(cam.transform.position, size);
+    int32 c = 10;
+    for zi: -c .. c+1 for yi: -c .. c+1 for xi: -c .. c+1 {
+        ivec3 coord = make_ivec(center) + { xi, yi, zi } * size as int32;
+        int32 seed = coord.x + coord.y*18 + coord.z*57;
+        vec3 ofs = make_vec(random01(seed++), random01(seed++), random01(seed++)) * size;
+
+        vec3 pos = center + { xi, yi, zi } * size;
+        // gizmo_point(pos + ofs, White);
+
+        GizmoPoint p = {};
+        p.pos = pos + ofs;
+        p.color = White;
+        p.size = 0.1;
+        add_point(*ambient_particles, p);
+    }
+
+    disable_blending();
+    enable_depth_test();
+    use(*gizmo_points_shader);
+    dispatch(*ambient_particles);
+
     end_frame(R);
 }
 
