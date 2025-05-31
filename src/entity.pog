@@ -6,6 +6,7 @@ enum EntityType {
 }
 
 struct Entity {
+    Entity* parent;
     EntityType entity_type;
 
     // TODO: flags
@@ -14,11 +15,22 @@ struct Entity {
     with Transform tr;
     with Rigidbody rb;
 
-    DrawBuffers db;
+    Model* model;
 }
 
 Entity[1024] entities;
 uint32 entities_count;
+
+struct Projectile {
+    vec3 pos, vel;
+}
+
+Projectile[1024] projectiles;
+uint32 projectiles_count;
+
+mat4 get_matrix(Entity* en) {
+    return to_matrix(en.tr) * (en.parent ? get_matrix(en.parent) : mat4_identity());
+}
 
 Entity* entity_spawn() {
     for 0 .. entities_count {
@@ -44,7 +56,7 @@ void entity_despawn(Entity* en) {
 }
 
 void entity_update(Entity* en) {
-    float32 dt = deltatime();
+    float32 dt = 1.0 / 60.0; // deltatime();
 
     float32 damp_factor = 1.0;
     en.rb.velocity = en.rb.velocity - en.rb.velocity * damp_factor * dt;
@@ -53,6 +65,13 @@ void entity_update(Entity* en) {
     en.rb.angular_velocity = en.rb.angular_velocity - en.rb.angular_velocity * angular_damp * dt;
 
     update_rigidbody_transform(*en.tr, *en.rb, dt);
+}
+
+void fire_gun(Entity* en) {
+    let pj = *projectiles[projectiles_count++];
+    let f = forward(en.tr);
+    pj.vel = f*300 + en.rb.velocity;
+    pj.pos = en.tr.position + f*en.model.mesh.bb_max.z;
 }
 
 enum ItemType {

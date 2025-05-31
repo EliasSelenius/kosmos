@@ -16,13 +16,36 @@ include "../grax/src/marching_cubes.pog";
 Camera player_camera = make_camera(90 * deg2rad, 0.1, 1000);
 Entity* player_spaceship;
 
-DrawBuffers db_SpaceShip;
 DrawBuffers db_billboard;
+
+Model model_SpaceShip;
+
+struct Model {
+    char* name;
+    Mesh mesh;
+    DrawBuffers db;
+}
+
+Model load_model(char* name) {
+    Model m = {};
+    m.name = name;
+
+    let obj = load_obj(name);
+    m.mesh = obj_to_mesh(obj);
+    free_obj(obj);
+
+    gen_normals(m.mesh);
+    calc_bounds(*m.mesh);
+
+    m.db = create_draw_buffers(m.mesh);
+
+    return m;
+}
 
 Batch_Of_Points ambient_particles;
 
 void load_assets() {
-    db_SpaceShip = load_drawable("../shared_assets/space/SpaceShip.obj");
+    model_SpaceShip = load_model("../shared_assets/space/SpaceShip.obj");
 
     // db_billboard = create_draw_buffer();
 }
@@ -41,7 +64,7 @@ void main() {
     ambient_particles = create_batch_of_points();
 
     player_spaceship = entity_spawn();
-    player_spaceship.db = db_SpaceShip;
+    player_spaceship.model = *model_SpaceShip;
 
     player_camera.transform.position = { 20, 30, 0 };
 
@@ -78,12 +101,12 @@ void main() {
     int32 seed = 0;
     for 0 .. 3 {
         let en = entity_spawn();
-        en.db = db_SpaceShip;
+        en.model = *model_SpaceShip;
         en.tr.position = { random(seed++), random(seed++), random(seed++) } * 100;
     }
 
     while grax_loop() {
-        float32 dt = deltatime();
+        float32 dt = 1.0 / 60.0; // deltatime();
 
         uint32 size = 4;
         uint32 count = size*size*size;
@@ -134,6 +157,10 @@ void main() {
 
                     vec3 cam_target = player_spaceship.tr.position - forward * 30;
                     player_camera.transform.position = exp_decay(player_camera.transform.position, cam_target, 2, dt);
+
+                    if mouse(Left_Mouse) {
+                        fire_gun(player_spaceship);
+                    }
                 }
 
                 draw_world(R, player_camera);
@@ -200,6 +227,7 @@ uint32 asteroid_count = 1;
 Asteroid[1024] asteroids;
 
 void draw_world(DeferredRenderer* R, Camera cam) {
+    update_matrices(*cam);
 
     let time = app.total_run_time / 5.0;
     R.sun_dir = { cos(time), 0, sin(time) };
@@ -210,8 +238,19 @@ void draw_world(DeferredRenderer* R, Camera cam) {
     begin_geometry_pass(R, cam);
 
     for 0 .. entities_count {
-        let en = entities[it];
-        if en.is_alive  draw_geometry(R, en.db, to_matrix(en.tr));
+        let en = *entities[it];
+
+        let matrix = get_matrix(en);
+
+        vec2 mi;
+        vec2 mx;
+        if arcndc_rect_of(cam, matrix, en.model.mesh.bb_min, en.model.mesh.bb_max, *mi, *mx) {
+            anchor = .bottom_left;
+            draw_rect(mi, mx - mi, opacity(White, 0.4));
+            anchor = .center;
+        }
+
+        if en.is_alive  draw_geometry(R, en.model.db, matrix);
     }
 
     for 0 .. asteroid_count {
@@ -219,6 +258,20 @@ void draw_world(DeferredRenderer* R, Camera cam) {
         draw_geometry(R, a.mc.db, to_matrix(a.tr));
     }
 
+    if mouse_pressed(Left_Mouse) {
+        let data = read_gbuffer(R);
+        gizmo_point(data.pos, Cyan);
+        gizmo_line(data.pos, data.pos + data.normal, Yellow);
+
+        let pos = xyz(make_vec(data.pos, 1.0) * to_inverse_matrix(player_spaceship.tr));
+        let normal = data.normal * make_mat3(to_inverse_matrix(player_spaceship.tr));
+
+        let en = entity_spawn();
+        en.parent = player_spaceship;
+        en.model = *model_SpaceShip;
+        look_at(*en.tr, vec3_unit_z, normal);
+        en.tr.position = pos;
+    }
 
     begin_light_pass(R);
 
@@ -240,6 +293,16 @@ void draw_world(DeferredRenderer* R, Camera cam) {
         add_point(*ambient_particles, p);
     }
 
+    for 0 .. projectiles_count {
+        let pj = projectiles[it];
+
+        GizmoPoint p = {};
+        p.pos = pj.pos;
+        p.color = Orange;
+        p.size = 1;
+        add_point(*ambient_particles, p);
+    }
+
     disable_blending();
     enable_depth_test();
     use(*gizmo_points_shader);
@@ -249,8 +312,17 @@ void draw_world(DeferredRenderer* R, Camera cam) {
 }
 
 void update_world() {
+    float32 dt = 1.0 / 60.0; // deltatime();
+
     for 0 .. entities_count {
         let en = *entities[it];
         if en.is_alive  entity_update(en);
+    }
+
+
+    for 0 .. projectiles_count {
+        let pj = *projectiles[it];
+        pj.pos = pj.pos + pj.vel*dt;
+
     }
 }
