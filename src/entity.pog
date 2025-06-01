@@ -16,6 +16,9 @@ struct Entity {
     with Rigidbody rb;
 
     Model* model;
+    Material_PBR pbr;
+
+    float32 gun_cooldown;
 }
 
 Entity[1024] entities;
@@ -48,6 +51,10 @@ Entity* entity_spawn() {
     en.tr = transform_default();
     en.rb.mass = 1;
 
+    en.pbr.metallic = 1;
+    en.pbr.roughness = 0.5;
+    en.pbr.albedo = {1,1,1};
+
     return en;
 }
 
@@ -65,13 +72,21 @@ void entity_update(Entity* en) {
     en.rb.angular_velocity = en.rb.angular_velocity - en.rb.angular_velocity * angular_damp * dt;
 
     update_rigidbody_transform(*en.tr, *en.rb, dt);
+
+    if en.gun_cooldown > 0 {
+        en.gun_cooldown -= dt;
+    }
 }
 
 void fire_gun(Entity* en) {
+    if en.gun_cooldown > 0 return;
+
     let pj = *projectiles[projectiles_count++];
     let f = forward(en.tr);
-    pj.vel = f*300 + en.rb.velocity;
+    pj.vel = f*600 + en.rb.velocity;
     pj.pos = en.tr.position + f*en.model.mesh.bb_max.z;
+
+    en.gun_cooldown = 0.1;
 }
 
 enum ItemType {

@@ -16,6 +16,8 @@ include "../grax/src/marching_cubes.pog";
 Camera player_camera = make_camera(90 * deg2rad, 0.1, 1000);
 Entity* player_spaceship;
 
+DeferredRenderer renderer;
+
 DrawBuffers db_billboard;
 
 Model model_SpaceShip;
@@ -51,14 +53,35 @@ void load_assets() {
 }
 
 enum GameViewMode { World; Tactical; FreeCam; }
-GameViewMode game_view_mode = .World;
+GameViewMode game_view_mode = .Tactical;
+
+void on_event(AppEvent event, AppEventData data) {
+
+    void reload_shader(Shader* shader, bool tess, geom) {
+        delete_shader(@shader);
+        @shader = load_shader(shader.name.chars, tess, geom);
+    }
+
+    switch event {
+        case .key_press: {
+            if data.key == 'R' {
+
+                reload_shader(*renderer.shader_skybox, false, false);
+                reload_shader(*renderer.shader_dirlight, false, false);
+
+                print("SHADER RELOAD\n");
+            }
+        } break;
+    }
+}
 
 void main() {
+    app.on_event = on_event;
     grax_init();
     gizmo_setup();
     load_assets();
 
-    let renderer = deferred_renderer_init();
+    renderer = deferred_renderer_init();
     let R = *renderer;
 
     ambient_particles = create_batch_of_points();
@@ -129,13 +152,9 @@ void main() {
         switch (game_view_mode) {
             case .World: {
 
-                if key(GLFW_KEY_LEFT_ALT) {
-                    enable_cursor();
-                } else {
-                    disable_cursor();
-                }
-
                 {
+                    disable_cursor();
+
                     mat4 m = to_matrix(player_spaceship.tr);
                     let forward = xyz(m.row3);
                     let left    = xyz(m.row1);
@@ -144,18 +163,27 @@ void main() {
                     let force = forward * Input.wasd.y;
                     add_force(*player_spaceship.rb, force);
 
-                    float32 turn_speed = 2 * dt;
-                    add_torque(*player_spaceship.rb, turn_speed * noz(up      * Input.mouse_delta.x));
-                    add_torque(*player_spaceship.rb, turn_speed * noz(left    * Input.mouse_delta.y));
-                    add_torque(*player_spaceship.rb, turn_speed * noz(forward * input_axis(GLFW_KEY_D, GLFW_KEY_A)));
 
-                    let look_pos = player_spaceship.tr.position + forward * 30;
+                    vec3 input = { Input.mouse_delta.y, Input.mouse_delta.x, input_axis(GLFW_KEY_D, GLFW_KEY_A) };
+
+                    if key(GLFW_KEY_LEFT_ALT) {
+                        // enable_cursor();
+                        @((*input) as vec2*) = {0, 0};
+                    } else {
+                    }
+
+                    add_torque(*player_spaceship.rb, noz(input * make_mat3(m)) * 2 * dt);
+
+                    let ship_pos = player_spaceship.tr.position;
+                    let look_pos = ship_pos + forward * 30 + up * 10;
+
+
                     look_at(*player_camera.transform, look_pos, up);
 
-                    gizmo_point(look_pos, Cyan, 0.5);
-                    gizmo_point(player_spaceship.tr.position + forward * 60, Cyan, 0.5);
+                    gizmo_point(ship_pos + forward * 30, Cyan, 0.5);
+                    gizmo_point(ship_pos + forward * 60, Cyan, 0.5);
 
-                    vec3 cam_target = player_spaceship.tr.position - forward * 30;
+                    vec3 cam_target = ship_pos + forward * -30 + up * 10;
                     player_camera.transform.position = exp_decay(player_camera.transform.position, cam_target, 2, dt);
 
                     if mouse(Left_Mouse) {
@@ -242,15 +270,15 @@ void draw_world(DeferredRenderer* R, Camera cam) {
 
         let matrix = get_matrix(en);
 
-        vec2 mi;
-        vec2 mx;
-        if arcndc_rect_of(cam, matrix, en.model.mesh.bb_min, en.model.mesh.bb_max, *mi, *mx) {
-            anchor = .bottom_left;
-            draw_rect(mi, mx - mi, opacity(White, 0.4));
-            anchor = .center;
-        }
+        // vec2 mi;
+        // vec2 mx;
+        // if arcndc_rect_of(cam, matrix, en.model.mesh.bb_min, en.model.mesh.bb_max, *mi, *mx) {
+        //     anchor = .bottom_left;
+        //     draw_rect(mi, mx - mi, opacity(White, 0.4));
+        //     anchor = .center;
+        // }
 
-        if en.is_alive  draw_geometry(R, en.model.db, matrix);
+        if en.is_alive  draw_geometry(R, en.model.db, en.pbr, matrix);
     }
 
     for 0 .. asteroid_count {
@@ -266,31 +294,43 @@ void draw_world(DeferredRenderer* R, Camera cam) {
         let pos = xyz(make_vec(data.pos, 1.0) * to_inverse_matrix(player_spaceship.tr));
         let normal = data.normal * make_mat3(to_inverse_matrix(player_spaceship.tr));
 
-        let en = entity_spawn();
-        en.parent = player_spaceship;
-        en.model = *model_SpaceShip;
-        look_at(*en.tr, vec3_unit_z, normal);
-        en.tr.position = pos;
+        void spawn_comp(vec3 pos, normal) {
+            let en = entity_spawn();
+            en.parent = player_spaceship;
+            en.model = *model_SpaceShip;
+            look_at(*en.tr, vec3_unit_z, normal);
+            en.tr.position = pos;
+        }
+
+        spawn_comp(pos, normal);
+        vec3[] mirrors = {make_vec(-1, 1, 1), make_vec(1, -1, 1), make_vec(-1, -1, 1)};
+        if key(GLFW_KEY_LEFT_CONTROL) {
+            for 0 .. mirrors.length {
+                spawn_comp(pos * mirrors[it], normal * mirrors[it]);
+            }
+        }
     }
 
     begin_light_pass(R);
 
-    float32 size = 10;
-    vec3 center = round2multiple(cam.transform.position, size);
-    int32 c = 10;
-    for zi: -c .. c+1 for yi: -c .. c+1 for xi: -c .. c+1 {
-        ivec3 coord = make_ivec(center) + { xi, yi, zi } * size as int32;
-        int32 seed = coord.x + coord.y*18 + coord.z*57;
-        vec3 ofs = make_vec(random01(seed++), random01(seed++), random01(seed++)) * size;
+    if true {
+        float32 size = 10;
+        vec3 center = round2multiple(cam.transform.position, size);
+        int32 c = 10;
+        for zi: -c .. c+1 for yi: -c .. c+1 for xi: -c .. c+1 {
+            ivec3 coord = make_ivec(center) + { xi, yi, zi } * size as int32;
+            int32 seed = coord.x + coord.y*18 + coord.z*57;
+            vec3 ofs = make_vec(random01(seed++), random01(seed++), random01(seed++)) * size;
 
-        vec3 pos = center + { xi, yi, zi } * size;
-        // gizmo_point(pos + ofs, White);
+            vec3 pos = center + { xi, yi, zi } * size;
+            // gizmo_point(pos + ofs, White);
 
-        GizmoPoint p = {};
-        p.pos = pos + ofs;
-        p.color = White;
-        p.size = 0.1;
-        add_point(*ambient_particles, p);
+            GizmoPoint p = {};
+            p.pos = pos + ofs;
+            p.color = White;
+            p.size = 0.1;
+            add_point(*ambient_particles, p);
+        }
     }
 
     for 0 .. projectiles_count {
