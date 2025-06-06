@@ -7,6 +7,8 @@ enum EntityType {
 
 struct Entity {
     Entity* parent;
+    Entity*[..] children;
+    Entity* mirror_entity;
     EntityType entity_type;
 
     // TODO: flags
@@ -18,7 +20,9 @@ struct Entity {
     Model* model;
     Material_PBR pbr;
 
+    uint32 team_id;
     float32 gun_cooldown;
+    float32 hp;
 }
 
 Entity[1024] entities;
@@ -26,26 +30,27 @@ uint32 entities_count;
 
 struct Projectile {
     vec3 pos, vel;
+    float32 life_time;
+    uint32 team_id;
 }
 
-Projectile[1024] projectiles;
-uint32 projectiles_count;
+Projectile[..] projectiles = list_create(sizeof Projectile);
 
 mat4 get_matrix(Entity* en) {
     return to_matrix(en.tr) * (en.parent ? get_matrix(en.parent) : mat4_identity());
 }
 
 Entity* entity_spawn() {
+    Entity* en = null;
     for 0 .. entities_count {
-        Entity* en = *entities[it];
-        if en.is_alive == false {
-            @en = {};
-            en.is_alive = true;
-            return en;
+        Entity* o = *entities[it];
+        if o.is_alive == false {
+            en = o;
+            break;
         }
     }
 
-    Entity* en = *entities[entities_count++];
+    if en == null en = *entities[entities_count++];
     @en = {};
     en.is_alive = true;
     en.tr = transform_default();
@@ -54,6 +59,11 @@ Entity* entity_spawn() {
     en.pbr.metallic = 1;
     en.pbr.roughness = 0.5;
     en.pbr.albedo = {1,1,1};
+
+    en.hp = 100;
+
+    static uint32 cur_team_id;
+    en.team_id = cur_team_id++;
 
     return en;
 }
@@ -64,6 +74,8 @@ void entity_despawn(Entity* en) {
 
 void entity_update(Entity* en) {
     float32 dt = 1.0 / 60.0; // deltatime();
+
+    let matrix = get_matrix(en);
 
     float32 damp_factor = 1.0;
     en.rb.velocity = en.rb.velocity - en.rb.velocity * damp_factor * dt;
@@ -76,15 +88,73 @@ void entity_update(Entity* en) {
     if en.gun_cooldown > 0 {
         en.gun_cooldown -= dt;
     }
+
+    for 0 .. list_length(projectiles) {
+        let pj = projectiles[it];
+        if pj.team_id == en.team_id continue;
+        let d = sphere_dist(en.tr.position, en.model.mesh.max_radius, pj.pos, 0);
+        if d < 0 {
+            en.hp -= 1.1;
+            list_unordered_remove(projectiles, it);
+            it--;
+        }
+    }
+
+    if en != player_spaceship and !(en.parent and en.parent == player_spaceship) {
+        vec2 mi;
+        vec2 mx;
+        if arcndc_rect_of(player_camera, matrix, en.model.mesh.bb_min, en.model.mesh.bb_max, *mi, *mx) {
+            anchor = .bottom_left;
+            // draw_rect(mi, mx - mi, opacity(White, 0.4));
+
+            vec2 size = mx - mi;
+
+            vec2 bl = mi;
+            vec2 br = make_vec(mx.x, mi.y);
+            vec2 tr = mx;
+            vec2 tl = make_vec(mi.x, mx.y);
+
+            float32 w = 0.005;
+            float32 len  = 0.25 * min(size.x, size.y);
+            anchor = .bottom_left;
+            draw_rect(bl, make_vec(len, w), Red);
+            draw_rect(bl, make_vec(w, len), Red);
+            anchor = .bottom_right;
+            draw_rect(br, make_vec(len, w), Red);
+            draw_rect(br, make_vec(w, len), Red);
+            anchor = .top_right;
+            draw_rect(tr, make_vec(len, w), Red);
+            draw_rect(tr, make_vec(w, len), Red);
+            anchor = .top_left;
+            draw_rect(tl, make_vec(len, w), Red);
+            draw_rect(tl, make_vec(w, len), Red);
+
+            vec2 bar_size = {0.2, 0.01};
+            float32 hp_prct = en.hp / 100.0;
+            anchor = .top_left;
+            vec2 p = mx + make_vec(w * 3, -w);
+            draw_rect(p, bar_size, Gray);
+            draw_rect(p, bar_size * make_vec(hp_prct, 1), Red);
+
+            draw_text(p + make_vec(0, -bar_size.y), 0.03, to_string(en.hp), Red);
+
+            anchor = .center;
+        }
+    }
+
+
+    // gizmo_sphere(en.tr.position, en.model.mesh.max_radius, Green);
 }
 
 void fire_gun(Entity* en) {
     if en.gun_cooldown > 0 return;
 
-    let pj = *projectiles[projectiles_count++];
+    let pj = list_append(*projectiles) as Projectile*;
     let f = forward(en.tr);
-    pj.vel = f*600 + en.rb.velocity;
+    pj.vel = f*600 + en.rb.velocity + random_unit_vec3() * random01() * 10;
     pj.pos = en.tr.position + f*en.model.mesh.bb_max.z;
+    pj.life_time = 0;
+    pj.team_id = en.team_id;
 
     en.gun_cooldown = 0.1;
 }
