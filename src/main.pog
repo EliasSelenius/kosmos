@@ -16,21 +16,48 @@ include "../grax/src/marching_cubes.pog";
 Camera player_camera = make_camera(90 * deg2rad, 0.1, 10_000);
 Entity* player_spaceship;
 
+enum GameViewMode { World; Tactical; FreeCam; ShipBuilder; }
+GameViewMode game_view_mode = .Tactical;
+
 DeferredRenderer renderer;
+Batch_Of_Points ambient_particles;
 
 DrawBuffers db_billboard;
 
 Model model_SpaceShip;
+Model[..] kitbash_parts;
+
 
 struct Model {
-    char* name;
+    string name;
     Mesh mesh;
     DrawBuffers db;
 }
 
+Model[..] load_models(char* name) {
+    let obj = load_obj(name);
+    Model[..] models = list_create(sizeof Model);
+
+    for 0 .. list_length(obj.objects) {
+        let o = *obj.objects[it];
+        Model m = {};
+        m.name = alloc_string_copy(o.name);
+        m.mesh = obj_to_mesh(obj, o.indices_length, o.indices_start);
+        gen_normals(m.mesh);
+        calc_bounds(*m.mesh);
+        set_origin(m.mesh, avg_vertex_pos(m.mesh));
+        m.db = create_draw_buffers(m.mesh);
+
+        list_add(*models, *m);
+    }
+
+    free_obj(obj);
+    return models;
+}
+
 Model load_model(char* name) {
     Model m = {};
-    m.name = name;
+    m.name = make_string(name);
 
     let obj = load_obj(name);
     m.mesh = obj_to_mesh(obj);
@@ -44,16 +71,12 @@ Model load_model(char* name) {
     return m;
 }
 
-Batch_Of_Points ambient_particles;
-
 void load_assets() {
     model_SpaceShip = load_model("../shared_assets/space/SpaceShip.obj");
+    kitbash_parts   = load_models("assets/kitbash.obj");
 
     // db_billboard = create_draw_buffer();
 }
-
-enum GameViewMode { World; Tactical; FreeCam; ShipBuilder; }
-GameViewMode game_view_mode = .Tactical;
 
 void on_event(AppEvent event, AppEventData data) {
 
@@ -75,15 +98,14 @@ void on_event(AppEvent event, AppEventData data) {
     }
 }
 
-Entity* add_component(Entity* ship, vec3 pos, normal) {
+Entity* add_component(Entity* ship, Model* model, vec3 pos, normal) {
     let comp = entity_spawn();
     comp.parent = ship;
     if ship.children == null  ship.children = list_create(sizeof Entity*);
     list_add(*ship.children, *comp);
 
-    comp.model = *model_SpaceShip;
+    comp.model = model;
     set_tr(comp, pos, normal);
-    comp.tr.scale = vec3_one*0.6;
     return comp;
 }
 
@@ -214,10 +236,18 @@ void main() {
                 let ship = player_spaceship;
                 let m = get_matrix(ship);
 
-                camera_orbit_control(*player_camera, player_spaceship.tr.position);
+                camera_orbit_control(*player_camera, ship.tr.position);
+
 
                 static Entity* selection;
                 let rayres = raycast(ship);
+                let part = part_selection_menu();
+                if part {
+                    selection = add_component(ship, part, rayres.point, rayres.normal);
+                    selection.tr.scale.x = -1;
+                    selection.tr.scale.z = -1;
+                }
+
 
                 let im = to_inverse_matrix(ship.tr);
 
@@ -251,7 +281,6 @@ void main() {
                         }
                     } else {
                         if rayres.tri_index == -1 {
-                            // TODO: delete selection
                             selection.is_alive = false;
                             list_remove(ship.children, *selection);
 
@@ -262,25 +291,27 @@ void main() {
                         }
                         selection = null;
                     }
-                } else if rayres.tri_index != -1 {
-                    vec3 p1 = ship.model.mesh.vertices[ship.model.mesh.indices[rayres.tri_index+0]].pos;
-                    vec3 p2 = ship.model.mesh.vertices[ship.model.mesh.indices[rayres.tri_index+1]].pos;
-                    vec3 p3 = ship.model.mesh.vertices[ship.model.mesh.indices[rayres.tri_index+2]].pos;
-                    vec3 normal = normalize(cross(p2 - p1, p3 - p1));
-                    let point = rayres.point;
+                } else {
 
-                    vec3 wpos = xyz(make_vec(point, 1.0) * m);
-                    vec3 wnormal = normalize(normal * make_mat3(m));
-                    gizmo_point(wpos, Purple);
-                    gizmo_line(wpos, wpos + wnormal, Yellow);
 
-                    if mouse_pressed(Left_Mouse) {
 
-                        let comp = add_component(ship, point, normal);
-                        if key(GLFW_KEY_LEFT_CONTROL) {
-                            vec3 mirror = {-1, 1, 1};
-                            comp.mirror_entity = add_component(ship, point * mirror, normal * mirror);
-                            comp.mirror_entity.mirror_entity = comp;
+                    if rayres.tri_index != -1 {
+                        vec3 normal = rayres.normal;
+                        let point = rayres.point;
+
+                        vec3 wpos = xyz(make_vec(point, 1.0) * m);
+                        vec3 wnormal = normalize(normal * make_mat3(m));
+                        gizmo_point(wpos, Purple);
+                        gizmo_line(wpos, wpos + wnormal, Yellow);
+
+                        if mouse_pressed(Left_Mouse) {
+
+                            let comp = add_component(ship, *model_SpaceShip, point, normal);
+                            if key(GLFW_KEY_LEFT_CONTROL) {
+                                vec3 mirror = {-1, 1, 1};
+                                comp.mirror_entity = add_component(ship, *model_SpaceShip, point * mirror, normal * mirror);
+                                comp.mirror_entity.mirror_entity = comp;
+                            }
                         }
                     }
                 }
@@ -295,6 +326,29 @@ void main() {
 
         gizmo_dispatch();
     }
+}
+
+Model* part_selection_menu() {
+    Model* res = null;
+
+    float32 glyph_height = 0.05;
+
+    anchor = .top_left;
+    for 0 .. list_length(kitbash_parts) {
+        let m = *kitbash_parts[it];
+        vec2 pos = app.top_left + make_vec(0.1, -glyph_height * it -0.1);
+        vec2 size = { glyph_height / 2.0 * m.name.length, -glyph_height };
+        let a = pos;
+        let b = pos + size;
+        bool inside = point_inside_bb(Input.mouse_pos, min(a,b), max(a,b));
+
+        draw_text(pos, glyph_height, m.name, inside ? Red : White);
+
+        if inside and mouse_pressed(Left_Mouse) res = m;
+    }
+    anchor = .center;
+
+    return res;
 }
 
 void player_control(Entity* en, float32 dt) {
@@ -482,9 +536,9 @@ struct RaycastResult {
     vec3 point, normal;
 }
 
+RaycastResult raycast(Entity*[] ens);
 
 RaycastResult raycast(Entity* en) {
-    let m = get_matrix(en);
     let im = to_inverse_matrix(en.tr);
 
     update_matrices(*player_camera);
