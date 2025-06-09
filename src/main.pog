@@ -11,6 +11,8 @@ include "../grax/src/marching_cubes.pog";
     - spot light
     - area light
     - bloom
+    - ai
+    - glTF
 */
 
 Camera player_camera = make_camera(90 * deg2rad, 0.1, 10_000);
@@ -27,6 +29,13 @@ DrawBuffers db_billboard;
 Model model_SpaceShip;
 Model[..] kitbash_parts;
 
+Model* get_kitbash_model(char* name) {
+    for 0 .. list_length(kitbash_parts) {
+        let m = *kitbash_parts[it];
+        if string_equals(m.name, name) return m;
+    }
+    return null;
+}
 
 struct Model {
     string name;
@@ -100,12 +109,15 @@ void on_event(AppEvent event, AppEventData data) {
 
 Entity* add_component(Entity* ship, Model* model, vec3 pos, normal) {
     let comp = entity_spawn();
+    comp.team_id = ship.team_id;
     comp.parent = ship;
     if ship.children == null  ship.children = list_create(sizeof Entity*);
     list_add(*ship.children, *comp);
 
     comp.model = model;
     set_tr(comp, pos, normal);
+    comp.tr.scale.x = -1;
+    comp.tr.scale.z = -1;
     return comp;
 }
 
@@ -113,6 +125,14 @@ void set_tr(Entity* en, vec3 point, normal) {
     en.tr.position = vec3_zero;
     look_at(*en.tr, vec3_unit_z, normal);
     en.tr.position = point;
+}
+
+void draw_lines_to_children(Entity* en) {
+    if en.children for 0 .. list_length(en.children) {
+        let c = en.children[it];
+        let m = get_matrix(en);
+        gizmo_line(en.tr.position, transform_point(c.tr.position, m), Yellow);
+    }
 }
 
 void main() {
@@ -234,18 +254,19 @@ void main() {
 
             case .ShipBuilder: {
                 let ship = player_spaceship;
-                let m = get_matrix(ship);
 
                 camera_orbit_control(*player_camera, ship.tr.position);
 
+                draw_lines_to_children(ship);
 
                 static Entity* selection;
-                let rayres = raycast(ship);
+                let rayres = raycast_recursive(ship, selection);
                 let part = part_selection_menu();
                 if part {
                     selection = add_component(ship, part, rayres.point, rayres.normal);
-                    selection.tr.scale.x = -1;
-                    selection.tr.scale.z = -1;
+                    vec3 mirror = {-1, 1, 1};
+                    selection.mirror_entity = add_component(ship, part, rayres.point * mirror, rayres.normal * mirror);
+                    selection.mirror_entity.mirror_entity = selection;
                 }
 
 
@@ -255,22 +276,17 @@ void main() {
                 vec3 o = xyz(make_vec(player_camera.transform.position, 1.0) * im);
                 vec3 d = xyz(make_vec(camera_ray(player_camera, Input.mouse_pos), 0.0) * im);
 
-                if ship.children {
-                    for 0 .. list_length(ship.children) {
-                        let comp = ship.children[it];
-                        if ray_sphere_intersects(o,d, comp.tr.position, 1) {
-                            gizmo_point(transform_point(comp.tr.position, m), Green, 1);
-                            if mouse_pressed(Left_Mouse) {
-                                selection = comp;
-                                break;
-                            }
-                        } else {
-                            gizmo_point(transform_point(comp.tr.position, m), Red, 1);
-                        }
-                    }
-                }
-
                 if selection {
+
+                    {
+                        let m = to_matrix(selection.tr) * to_inverse_matrix(selection.tr);
+                        print("matrix: ", m.row1, "\n");
+                        print("matrix: ", m.row2, "\n");
+                        print("matrix: ", m.row3, "\n");
+                        print("matrix: ", m.row4, "\n\n");
+                    }
+
+                    selection.pbr.albedo = {1, 0.1, 0.1};
                     if mouse(Left_Mouse) {
                         if rayres.tri_index != -1 {
                             set_tr(selection, rayres.point, rayres.normal);
@@ -289,30 +305,45 @@ void main() {
                                 list_remove(ship.children, *selection.mirror_entity);
                             }
                         }
+                        selection.pbr = default_material;
                         selection = null;
                     }
                 } else {
 
+                    // if ship.children {
+                    //     for 0 .. list_length(ship.children) {
+                    //         let comp = ship.children[it];
+                    //         float32 size = 0.25;
+                    //         Color color = Red;
+                    //         if ray_sphere_intersects(o,d, comp.tr.position, size) {
+                    //             if mouse_pressed(Left_Mouse) {
+                    //                 selection = comp;
+                    //                 color = Green;
+                    //                 break;
+                    //             } else {
+                    //                 size *= 2;
+                    //             }
+                    //         }
+                    //         gizmo_point(transform_point(comp.tr.position, m), color, size);
+                    //     }
+                    // }
 
+                    if rayres.en and rayres.en != ship {
+                        if mouse_pressed(Left_Mouse) {
+                            selection = rayres.en;
+
+                        }
+                    }
 
                     if rayres.tri_index != -1 {
                         vec3 normal = rayres.normal;
                         let point = rayres.point;
 
+                        let m = get_matrix(rayres.en);
                         vec3 wpos = xyz(make_vec(point, 1.0) * m);
                         vec3 wnormal = normalize(normal * make_mat3(m));
                         gizmo_point(wpos, Purple);
                         gizmo_line(wpos, wpos + wnormal, Yellow);
-
-                        if mouse_pressed(Left_Mouse) {
-
-                            let comp = add_component(ship, *model_SpaceShip, point, normal);
-                            if key(GLFW_KEY_LEFT_CONTROL) {
-                                vec3 mirror = {-1, 1, 1};
-                                comp.mirror_entity = add_component(ship, *model_SpaceShip, point * mirror, normal * mirror);
-                                comp.mirror_entity.mirror_entity = comp;
-                            }
-                        }
                     }
                 }
 
@@ -384,7 +415,8 @@ void player_control(Entity* en, float32 dt) {
     player_camera.transform.position = exp_decay(player_camera.transform.position, cam_target, 2, dt);
 
     if mouse(Left_Mouse) {
-        fire_gun(en);
+        // fire_gun(en);
+        comp_fire_gun(en);
     }
 }
 
@@ -523,7 +555,7 @@ void update_world() {
         pj.pos = pj.pos + pj.vel*dt;
         pj.life_time += dt;
 
-        if pj.life_time > 10.0 {
+        if pj.life_time > 3.0 {
             list_unordered_remove(projectiles, it);
             it--;
         }
@@ -532,25 +564,51 @@ void update_world() {
 
 
 struct RaycastResult {
+    Entity* en;
     int32 tri_index;
+    float32 sqdist;
     vec3 point, normal;
 }
 
-RaycastResult raycast(Entity*[] ens);
+RaycastResult combine(RaycastResult a, b) {
+    if a.sqdist <= b.sqdist  return a;
+    return b;
+}
+
+RaycastResult raycast_recursive(Entity* parent, exclude) {
+    // if parent == exclude {
+    //     RaycastResult res = {};
+    //     res.en = null;
+    //     res.tri_index = -1;
+    //     res.point = vec3_zero;
+    //     res.normal = vec3_unit_y;
+    //     res.sqdist = 10_000_000;
+    //     return res;
+    // }
+    RaycastResult res = raycast(parent);
+
+    if parent.children for 0 .. list_length(parent.children) {
+        let c = parent.children[it];
+        if c == exclude continue;
+        res = combine(res, raycast_recursive(c, exclude));
+    }
+    return res;
+}
 
 RaycastResult raycast(Entity* en) {
-    let im = to_inverse_matrix(en.tr);
+    let im = get_inverse_matrix(en);
 
     update_matrices(*player_camera);
     vec3 o = xyz(make_vec(player_camera.transform.position, 1.0) * im);
     vec3 d = xyz(make_vec(camera_ray(player_camera, Input.mouse_pos), 0.0) * im);
 
     RaycastResult res = {};
+    res.en = en;
     res.tri_index = -1;
     res.point = vec3_zero;
     res.normal = vec3_unit_y;
+    res.sqdist = 10_000_000;
 
-    float32 sqd = 10_000_000;
     int32 i = 0;
     while i < list_length(en.model.mesh.indices) {
         vec3 p1 = en.model.mesh.vertices[en.model.mesh.indices[i+0]].pos;
@@ -560,8 +618,8 @@ RaycastResult raycast(Entity* en) {
         vec3 p;
         if ray_triangle_intersects(o,d, p1, p2, p3, *p) {
             let s = sqdist(o, p);
-            if s < sqd {
-                sqd = s;
+            if s < res.sqdist {
+                res.sqdist = s;
                 res.tri_index = i;
                 res.point = p;
             }

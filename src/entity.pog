@@ -25,6 +25,12 @@ struct Entity {
     float32 hp;
 }
 
+Material_PBR default_material = {
+    metallic = 1,
+    roughness = 0.5,
+    albedo = {1,1,1}
+};
+
 Entity[1024] entities;
 uint32 entities_count;
 
@@ -39,6 +45,12 @@ Projectile[..] projectiles = list_create(sizeof Projectile);
 mat4 get_matrix(Entity* en) {
     return to_matrix(en.tr) * (en.parent ? get_matrix(en.parent) : mat4_identity());
 }
+
+mat4 get_inverse_matrix(Entity* en) {
+    // return to_inverse_matrix(en.tr) * (en.parent ? get_inverse_matrix(en.parent) : mat4_identity());
+    return (en.parent ? get_inverse_matrix(en.parent) : mat4_identity()) * to_inverse_matrix(en.tr);
+}
+
 
 Entity* entity_spawn() {
     Entity* en = null;
@@ -56,9 +68,7 @@ Entity* entity_spawn() {
     en.tr = transform_default();
     en.rb.mass = 1;
 
-    en.pbr.metallic = 1;
-    en.pbr.roughness = 0.5;
-    en.pbr.albedo = {1,1,1};
+    en.pbr = default_material;
 
     en.hp = 100;
 
@@ -146,13 +156,28 @@ void entity_update(Entity* en) {
     // gizmo_sphere(en.tr.position, en.model.mesh.max_radius, Green);
 }
 
+void comp_fire_gun(Entity* en) {
+    if en.children {
+        for 0 .. list_length(en.children) {
+            let c = en.children[it];
+            if string_equals(c.model.name, "gun") {
+                fire_gun(c);
+            }
+        }
+    }
+}
+
 void fire_gun(Entity* en) {
     if en.gun_cooldown > 0 return;
 
     let pj = list_append(*projectiles) as Projectile*;
-    let f = forward(en.tr);
+
+    let m = get_matrix(en);
+    let f = xyz(m.row3)*-1;
+    let p = xyz(m.row4);
+
     pj.vel = f*600 + en.rb.velocity + random_unit_vec3() * random01() * 10;
-    pj.pos = en.tr.position + f*en.model.mesh.bb_max.z;
+    pj.pos = p + f*en.model.mesh.bb_max.z;
     pj.life_time = 0;
     pj.team_id = en.team_id;
 
