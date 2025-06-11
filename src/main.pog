@@ -52,9 +52,10 @@ Model[..] load_models(char* name) {
         Model m = {};
         m.name = alloc_string_copy(o.name);
         m.mesh = obj_to_mesh(obj, o.indices_length, o.indices_start);
+        set_origin(m.mesh, avg_vertex_pos(m.mesh));
         gen_normals(m.mesh);
         calc_bounds(*m.mesh);
-        set_origin(m.mesh, avg_vertex_pos(m.mesh));
+
         m.db = create_draw_buffers(m.mesh);
 
         list_add(*models, *m);
@@ -116,8 +117,6 @@ Entity* add_component(Entity* ship, Model* model, vec3 pos, normal) {
 
     comp.model = model;
     set_tr(comp, pos, normal);
-    comp.tr.scale.x = -1;
-    comp.tr.scale.z = -1;
     return comp;
 }
 
@@ -131,7 +130,9 @@ void draw_lines_to_children(Entity* en) {
     if en.children for 0 .. list_length(en.children) {
         let c = en.children[it];
         let m = get_matrix(en);
-        gizmo_line(en.tr.position, transform_point(c.tr.position, m), Yellow);
+        gizmo_line(transform_point(vec3_zero, m), transform_point(c.tr.position, m), Yellow);
+
+        draw_lines_to_children(c);
     }
 }
 
@@ -191,23 +192,11 @@ void main() {
     while grax_loop() {
         float32 dt = 1.0 / 60.0; // deltatime();
 
-        uint32 size = 4;
-        uint32 count = size*size*size;
-        uint32 count1 = (size+1)*(size+1)*(size+1);
-        for 0 .. count1 {
-            gizmo_point(make_vec(get_xyz(size+1, it)), Green);
-        }
-        for 0 .. count*3 {
-            uint32 group = it / count;
-            int32 index = it % count;
-            vec3[] offsets = {
-                {0.5, 0, 0},
-                {0, 0.5, 0},
-                {0, 0, 0.5}
-            };
-            let p = make_vec(get_xyz(size, index));
-            gizmo_point(p + offsets[group], Purple, 0.04);
-        }
+        let time = app.total_run_time / 5.0;
+        R.sun_dir = { cos(time), 0, sin(time) };
+        float32 sr = 15;
+        R.sun_radiance = { sr, sr, sr };
+        R.sun_ambient_factor = 0;
 
         switch (game_view_mode) {
             case .World: {
@@ -254,8 +243,13 @@ void main() {
 
             case .ShipBuilder: {
                 let ship = player_spaceship;
+                ship.mirror_entity = ship;
+
+                draw_hierarchy(make_vec(-1, 0.95), ship);
 
                 camera_orbit_control(*player_camera, ship.tr.position);
+
+                R.sun_dir = neg(forward(player_camera.transform));
 
                 draw_lines_to_children(ship);
 
@@ -269,65 +263,49 @@ void main() {
                     selection.mirror_entity.mirror_entity = selection;
                 }
 
-
-                let im = to_inverse_matrix(ship.tr);
-
-                update_matrices(*player_camera);
-                vec3 o = xyz(make_vec(player_camera.transform.position, 1.0) * im);
-                vec3 d = xyz(make_vec(camera_ray(player_camera, Input.mouse_pos), 0.0) * im);
-
                 if selection {
-
-                    {
-                        let m = to_matrix(selection.tr) * to_inverse_matrix(selection.tr);
-                        print("matrix: ", m.row1, "\n");
-                        print("matrix: ", m.row2, "\n");
-                        print("matrix: ", m.row3, "\n");
-                        print("matrix: ", m.row4, "\n\n");
-                    }
-
                     selection.pbr.albedo = {1, 0.1, 0.1};
                     if mouse(Left_Mouse) {
-                        if rayres.tri_index != -1 {
-                            set_tr(selection, rayres.point, rayres.normal);
-                            vec3 mirror = {-1, 1, 1};
-                            if selection.mirror_entity set_tr(selection.mirror_entity, rayres.point * mirror, rayres.normal * mirror);
+
+                        let snap = get_snap_point(player_camera.transform.position, camera_ray(player_camera, Input.mouse_pos), ship);
+                        if snap.en and snap.en != selection {
+                            set_relation(snap.en, selection);
+                            selection.tr.position = snap.lpos;
+                            selection.tr.rotation = quat_identity;
+
+                            if selection.mirror_entity and snap.en.mirror_entity {
+                                set_relation(snap.en.mirror_entity, selection.mirror_entity);
+                                selection.mirror_entity.tr.position = snap.lpos;
+                                selection.mirror_entity.tr.rotation = quat_identity;
+                            }
                         } else {
-                            selection.tr.position = o + d*30;
+                            if rayres.tri_index != -1 {
+                                set_relation(rayres.en, selection);
+                                set_tr(selection, rayres.point, rayres.normal);
+                                vec3 mirror = {-1, 1, 1};
+                                if selection.mirror_entity and rayres.en.mirror_entity {
+                                    set_relation(rayres.en.mirror_entity, selection.mirror_entity);
+                                    set_tr(selection.mirror_entity, rayres.point * mirror, rayres.normal * mirror);
+                                }
+                            } else {
+
+                                let im = to_inverse_matrix(ship.tr);
+                                update_matrices(*player_camera);
+                                vec3 o = xyz(make_vec(player_camera.transform.position, 1.0) * im);
+                                vec3 d = xyz(make_vec(camera_ray(player_camera, Input.mouse_pos), 0.0) * im);
+                                selection.tr.position = o + d*30;
+                            }
                         }
+
                     } else {
                         if rayres.tri_index == -1 {
-                            selection.is_alive = false;
-                            list_remove(ship.children, *selection);
-
-                            if selection.mirror_entity {
-                                selection.mirror_entity.is_alive = false;
-                                list_remove(ship.children, *selection.mirror_entity);
-                            }
+                            if selection.mirror_entity entity_despawn(selection.mirror_entity);
+                            entity_despawn(selection);
                         }
                         selection.pbr = default_material;
                         selection = null;
                     }
                 } else {
-
-                    // if ship.children {
-                    //     for 0 .. list_length(ship.children) {
-                    //         let comp = ship.children[it];
-                    //         float32 size = 0.25;
-                    //         Color color = Red;
-                    //         if ray_sphere_intersects(o,d, comp.tr.position, size) {
-                    //             if mouse_pressed(Left_Mouse) {
-                    //                 selection = comp;
-                    //                 color = Green;
-                    //                 break;
-                    //             } else {
-                    //                 size *= 2;
-                    //             }
-                    //         }
-                    //         gizmo_point(transform_point(comp.tr.position, m), color, size);
-                    //     }
-                    // }
-
                     if rayres.en and rayres.en != ship {
                         if mouse_pressed(Left_Mouse) {
                             selection = rayres.en;
@@ -380,6 +358,59 @@ Model* part_selection_menu() {
     anchor = .center;
 
     return res;
+}
+
+float32 draw_hierarchy(vec2 pos, Entity* en) {
+    float32 glyph_height = 0.05;
+
+    float32 start_y = pos.y;
+    draw_text(pos, glyph_height, en.model.name, White);
+    pos.x += glyph_height;
+    if en.children for 0 .. list_length(en.children) {
+        let child = en.children[it];
+        pos.y -= glyph_height;
+        pos.y += draw_hierarchy(pos, child);
+    }
+
+    return pos.y - start_y;
+}
+
+struct SnapPoint {
+    Entity* en;
+    vec3 lpos;
+    vec3 wpos;
+}
+
+SnapPoint get_snap_point(vec3 o,d, Entity* en) {
+    let m = get_matrix(en);
+
+    SnapPoint s = {};
+    s.en = en;
+
+    vec3 back  = transform_point(make_vec(0,0,en.model.mesh.bb_min.z), m);
+    vec3 front = transform_point(make_vec(0,0,en.model.mesh.bb_max.z), m);
+
+    gizmo_point(back, Cyan);
+    gizmo_point(front, Cyan);
+
+    if ray_sphere_intersects(o,d, back, 0.3) {
+        s.lpos = make_vec(0,0,en.model.mesh.bb_min.z);
+        s.wpos = back;
+        return s;
+    }
+
+    if ray_sphere_intersects(o,d, front, 0.3) {
+        s.lpos = make_vec(0,0,en.model.mesh.bb_max.z);
+        s.wpos = front;
+        return s;
+    }
+
+    if en.children for 0 .. list_length(en.children) {
+        let s = get_snap_point(o,d, en.children[it]);
+        if s.en return s;
+    }
+
+    return {};
 }
 
 void player_control(Entity* en, float32 dt) {
@@ -435,12 +466,6 @@ Asteroid[1024] asteroids;
 
 void draw_world(DeferredRenderer* R, Camera cam) {
     update_matrices(*cam);
-
-    let time = app.total_run_time / 5.0;
-    R.sun_dir = { cos(time), 0, sin(time) };
-    float32 sr = 15;
-    R.sun_radiance = { sr, sr, sr };
-    R.sun_ambient_factor = 0;
 
     begin_geometry_pass(R, cam);
 
@@ -589,7 +614,7 @@ RaycastResult raycast_recursive(Entity* parent, exclude) {
 
     if parent.children for 0 .. list_length(parent.children) {
         let c = parent.children[it];
-        if c == exclude continue;
+        if exclude if c == exclude or c == exclude.mirror_entity continue;
         res = combine(res, raycast_recursive(c, exclude));
     }
     return res;

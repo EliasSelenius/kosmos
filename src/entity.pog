@@ -78,8 +78,36 @@ Entity* entity_spawn() {
     return en;
 }
 
+void remove_parent(Entity* en) {
+    if en.parent == null return;
+    list_remove(en.parent.children, *en);
+    en.parent = null;
+}
+
+void set_relation(Entity* parent, child) {
+    if parent == child {
+        print("[ERROR]: Entity cannot be parented to itself.\n");
+        return;
+    }
+
+    if child.parent == parent return;
+    remove_parent(child);
+
+    child.parent = parent;
+    if parent.children == null  parent.children = list_create(sizeof Entity*);
+    list_add(*parent.children, *child);
+}
+
 void entity_despawn(Entity* en) {
-    @en = {};
+    remove_parent(en);
+    en.is_alive = false;
+    if en.children {
+        for 0 .. list_length(en.children) {
+            entity_despawn(en.children[it]);
+        }
+
+        list_delete(en.children);
+    }
 }
 
 void entity_update(Entity* en) {
@@ -110,7 +138,8 @@ void entity_update(Entity* en) {
         }
     }
 
-    if en != player_spaceship and !(en.parent and en.parent == player_spaceship) {
+    // draw target reticule
+    if en.team_id != player_spaceship.team_id {
         vec2 mi;
         vec2 mx;
         if arcndc_rect_of(player_camera, matrix, en.model.mesh.bb_min, en.model.mesh.bb_max, *mi, *mx) {
@@ -160,9 +189,8 @@ void comp_fire_gun(Entity* en) {
     if en.children {
         for 0 .. list_length(en.children) {
             let c = en.children[it];
-            if string_equals(c.model.name, "gun") {
-                fire_gun(c);
-            }
+            if string_equals(c.model.name, "gun") fire_gun(c);
+            comp_fire_gun(c);
         }
     }
 }
@@ -173,7 +201,7 @@ void fire_gun(Entity* en) {
     let pj = list_append(*projectiles) as Projectile*;
 
     let m = get_matrix(en);
-    let f = xyz(m.row3)*-1;
+    let f = xyz(m.row3);
     let p = xyz(m.row4);
 
     pj.vel = f*600 + en.rb.velocity + random_unit_vec3() * random01() * 10;
