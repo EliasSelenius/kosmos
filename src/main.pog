@@ -3,6 +3,8 @@ include "src/entity.pog";
 
 include "../grax/src/marching_cubes.pog";
 
+include "../plang/common/builtin/types.pog";
+
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O3
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O0 -g -fsanitize=address -fno-omit-frame-pointer
 
@@ -23,8 +25,11 @@ GameViewMode game_view_mode = .Tactical;
 
 DeferredRenderer renderer;
 Batch_Of_Points ambient_particles;
+Shader shader_cloud;
 
 DrawBuffers db_billboard;
+
+RenderLayer static_ui;
 
 Model model_SpaceShip;
 Model[..] kitbash_parts;
@@ -86,6 +91,8 @@ void load_assets() {
     kitbash_parts   = load_models("assets/kitbash.obj");
 
     // db_billboard = create_draw_buffer();
+
+    shader_cloud = load_shader("shader/cloud.glsl");
 }
 
 void on_event(AppEvent event, AppEventData data) {
@@ -101,6 +108,7 @@ void on_event(AppEvent event, AppEventData data) {
 
                 reload_shader(*renderer.shader_skybox, false, false);
                 reload_shader(*renderer.shader_dirlight, false, false);
+                reload_shader(*shader_cloud, false, false);
 
                 print("SHADER RELOAD\n");
             }
@@ -146,6 +154,9 @@ void main() {
     let R = *renderer;
 
     ambient_particles = create_batch_of_points();
+
+    static_ui = create_layer();
+    immediate_layer = *static_ui;
 
     player_spaceship = entity_spawn();
     player_spaceship.model = *model_SpaceShip;
@@ -202,6 +213,31 @@ void main() {
             case .World: {
 
                 player_control(player_spaceship, dt);
+
+                // {
+                //     let en = player_spaceship;
+
+                //     camera_orbit_control(*player_camera, en.tr);
+
+                //     mat4 m = to_matrix(en.tr);
+                //     let forward = xyz(m.row3);
+                //     let left    = xyz(m.row1);
+                //     let up      = xyz(m.row2);
+
+                //     let force = forward * key(GLFW_KEY_LEFT_SHIFT);
+                //     add_force(*en.rb, force);
+
+                //     if key(GLFW_KEY_LEFT_ALT) {
+                //     } else {
+                //         vec3 input = { -Input.wasd.y, 0, -Input.wasd.x };
+                //         add_torque(*en.rb, noz(input * make_mat3(m)) * 2 * dt);
+                //     }
+
+                //     if mouse(Left_Mouse) {
+                //         comp_fire_gun(en);
+                //     }
+                // }
+
                 draw_world(R, player_camera);
                 update_world();
 
@@ -267,7 +303,7 @@ void main() {
                     selection.pbr.albedo = {1, 0.1, 0.1};
                     if mouse(Left_Mouse) {
 
-                        let snap = get_snap_point(player_camera.transform.position, camera_ray(player_camera, Input.mouse_pos), ship);
+                        let snap = get_snap_point(player_camera.transform.position, camera_ray(player_camera, Input.mouse_pos), ship, selection);
                         if snap.en and snap.en != selection {
                             set_relation(snap.en, selection);
                             selection.tr.position = snap.lpos;
@@ -311,6 +347,8 @@ void main() {
                             selection = rayres.en;
 
                         }
+
+                        rayres.en.tr.scale = rayres.en.tr.scale + vec3_one * Input.mouse_scroll * 0.05;
                     }
 
                     if rayres.tri_index != -1 {
@@ -333,6 +371,7 @@ void main() {
             } break;
         }
 
+        dispatch_layer(*static_ui, {scale=1} as Transform2D);
         gizmo_dispatch();
     }
 }
@@ -381,7 +420,8 @@ struct SnapPoint {
     vec3 wpos;
 }
 
-SnapPoint get_snap_point(vec3 o,d, Entity* en) {
+SnapPoint get_snap_point(vec3 o,d, Entity* en, exclude) {
+    if en == exclude or en == exclude.mirror_entity return {};
     let m = get_matrix(en);
 
     SnapPoint s = {};
@@ -393,20 +433,21 @@ SnapPoint get_snap_point(vec3 o,d, Entity* en) {
     gizmo_point(back, Cyan);
     gizmo_point(front, Cyan);
 
-    if ray_sphere_intersects(o,d, back, 0.3) {
+    float32 dist;
+    if ray_sphere_intersects(o,d, back, 0.3, *dist) {
         s.lpos = make_vec(0,0,en.model.mesh.bb_min.z);
         s.wpos = back;
         return s;
     }
 
-    if ray_sphere_intersects(o,d, front, 0.3) {
+    if ray_sphere_intersects(o,d, front, 0.3, *dist) {
         s.lpos = make_vec(0,0,en.model.mesh.bb_max.z);
         s.wpos = front;
         return s;
     }
 
     if en.children for 0 .. list_length(en.children) {
-        let s = get_snap_point(o,d, en.children[it]);
+        let s = get_snap_point(o,d, en.children[it], exclude);
         if s.en return s;
     }
 
@@ -525,6 +566,13 @@ void draw_world(DeferredRenderer* R, Camera cam) {
     // }
 
     begin_light_pass(R);
+
+    enable_depth_test();
+    // enable_additive_blending();
+    enable_alpha_blending();
+    use(*shader_cloud);
+    set_uniform("camera_pos", player_camera.transform.position);
+    draw_screen_quad();
 
     if true {
         float32 size = 10;

@@ -84,8 +84,14 @@ void remove_parent(Entity* en) {
     en.parent = null;
 }
 
+bool is_ancestor(Entity* ancestor, en) {
+    if ancestor == en return true;
+    if ancestor.parent return is_ancestor(ancestor.parent, en);
+    return false;
+}
+
 void set_relation(Entity* parent, child) {
-    if parent == child {
+    if is_ancestor(parent, child) {
         print("[ERROR]: Entity cannot be parented to itself.\n");
         return;
     }
@@ -138,6 +144,12 @@ void entity_update(Entity* en) {
         }
     }
 
+    void engine_thrust(Entity* en) {
+        gizmo_sphere(transform_point(en.tr.position, get_matrix(en.parent)), en.model.mesh.max_radius, Red);
+    }
+
+    foreach_child_with_name(en, "engine", engine_thrust);
+
     // draw target reticule
     if en.team_id != player_spaceship.team_id {
         vec2 mi;
@@ -186,12 +198,14 @@ void entity_update(Entity* en) {
 }
 
 void comp_fire_gun(Entity* en) {
-    if en.children {
-        for 0 .. list_length(en.children) {
-            let c = en.children[it];
-            if string_equals(c.model.name, "gun") fire_gun(c);
-            comp_fire_gun(c);
-        }
+    foreach_child_with_name(en, "gun", fire_gun);
+}
+
+void foreach_child_with_name(Entity* en, char* name, void(Entity*) callback) {
+    if en.children for 0 .. list_length(en.children) {
+        let c = en.children[it];
+        if string_equals(c.model.name, name) callback(c);
+        foreach_child_with_name(c, name, callback);
     }
 }
 
