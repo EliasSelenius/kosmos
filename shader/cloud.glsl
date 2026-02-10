@@ -29,16 +29,13 @@ bool ray_sphere_intersects(vec3 o, vec3 d, vec3 c, float radius, inout float dis
     return delta >= 0 && dist >= 0;
 }
 
-float min3(vec3 v) { return min(v.x, min(v.y, v.z)); }
-float max3(vec3 v) { return max(v.x, max(v.y, v.z)); }
-
 vec2 ray_aabb_intersects(vec3 o, vec3 r, vec3 l, vec3 h) {
     vec3 t_low  = (l - o) / r;
     vec3 t_high = (h - o) / r;
     vec3 t_close = min(t_low, t_high);
     vec3 t_far   = max(t_low, t_high);
 
-    return vec2(max3(t_close), min3(t_far));
+    return vec2(max_axis(t_close), min_axis(t_far));
 }
 
 float density(vec3 p) {

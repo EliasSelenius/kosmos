@@ -98,7 +98,7 @@ void load_assets() {
 void on_event(AppEvent event, AppEventData data) {
 
     void reload_shader(Shader* shader, bool tess, geom) {
-        delete_shader(@shader);
+        delete_shader(shader);
         @shader = load_shader(shader.name.chars, tess, geom);
     }
 
