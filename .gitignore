@@ -6,3 +6,4 @@ output.lib
 shader_debug_log_*.txt
 output.ilk
 assets/kitbash.blend1
+output.rdi

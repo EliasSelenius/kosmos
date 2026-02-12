@@ -7,6 +7,7 @@ include "../plang/common/builtin/types.pog";
 
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O3
 // ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O0 -g -fsanitize=address -fno-omit-frame-pointer
+// ..\plang\bin\plang.exe src\main.pog cflags -lglfw3dll -O0 -g
 
 /*
     - point light
@@ -95,16 +96,16 @@ void load_assets() {
     shader_cloud = load_shader("shader/cloud.glsl");
 }
 
-void on_event(AppEvent event, AppEventData data) {
+void on_event(AppEvent event) {
 
     void reload_shader(Shader* shader, bool tess, geom) {
         delete_shader(shader);
         @shader = load_shader(shader.name.chars, tess, geom);
     }
 
-    switch event {
+    switch event.kind {
         case .key_press: {
-            if data.key == 'R' {
+            if event.key == 'R' {
 
                 reload_shader(*renderer.shader_skybox, false, false);
                 reload_shader(*renderer.shader_dirlight, false, false);
