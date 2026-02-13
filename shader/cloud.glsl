@@ -43,12 +43,6 @@ float density(vec3 p) {
     return d;
 }
 
-float get_fragdepth_from_world_space_point(vec3 point) {
-    vec4 clip_pos = camera.projection * camera.view * vec4(point, 1.0);
-    vec3 clip = clip_pos.xyz / clip_pos.w;
-    return (clip.z + 1.0) * 0.5;
-}
-
 void main() {
 
     // TODO: paremeterize these
