@@ -98,18 +98,13 @@ void load_assets() {
 
 void on_event(AppEvent event) {
 
-    void reload_shader(Shader* shader, bool tess, geom) {
-        delete_shader(shader);
-        @shader = load_shader(shader.name.chars, tess, geom);
-    }
-
     switch event.kind {
         case .key_press: {
             if event.key == 'R' {
 
-                reload_shader(*renderer.shader_skybox, false, false);
-                reload_shader(*renderer.shader_dirlight, false, false);
-                reload_shader(*shader_cloud, false, false);
+                shader_reload(*renderer.shader_skybox);
+                shader_reload(*renderer.shader_dirlight);
+                shader_reload(*shader_cloud);
 
                 print("SHADER RELOAD\n");
             }
@@ -180,7 +175,7 @@ void main() {
             let radius = length(pos) + h*20;
 
             float32 v = (gnoise(pos/10.0)+1)/2;
-            if v > 0.4 and radius < half*0.8   v = 1.0;
+            if v > 0.4 and radius < half*0.8   v = 0.5;
             else v = 0.0;
             a.mc.data[get_index(s, x, y, z)] = v;
         }

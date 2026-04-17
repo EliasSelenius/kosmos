@@ -145,6 +145,19 @@ void entity_update(Entity* en) {
     }
 
     void engine_thrust(Entity* en) {
+        if Input.wasd.y <= 0.0 return;
+
+        let pj = list_append(*projectiles) as Projectile*;
+
+        let m = get_matrix(en);
+        let f = xyz(m.row3);
+        let p = xyz(m.row4);
+
+        pj.vel = f * -10 + en.rb.velocity + random_unit_vec3() * random01() * 4;
+        pj.pos = p + f*en.model.mesh.bb_max.z;
+        pj.life_time = 0;
+        pj.team_id = en.team_id;
+
         gizmo_sphere(transform_point(en.tr.position, get_matrix(en.parent)), en.model.mesh.max_radius, Red);
     }
 
