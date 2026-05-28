@@ -21,22 +21,6 @@ layout(binding = 2) uniform sampler2D g_buffer_albedo;
 
 out vec4 FragColor;
 
-bool ray_sphere_intersects(vec3 o, vec3 d, vec3 c, float radius, inout float dist) {
-    float delta = sq(dot(d, o - c)) - (sq(length(o - c)) - sq(radius));
-
-    dist = -dot(d, o - c) - sqrt(delta);
-
-    return delta >= 0 && dist >= 0;
-}
-
-vec2 ray_aabb_intersects(vec3 o, vec3 r, vec3 l, vec3 h) {
-    vec3 t_low  = (l - o) / r;
-    vec3 t_high = (h - o) / r;
-    vec3 t_close = min(t_low, t_high);
-    vec3 t_far   = max(t_low, t_high);
-
-    return vec2(max_axis(t_close), min_axis(t_far));
-}
 
 float density(vec3 p) {
     float d = (noise(p * 0.1) + 1.0) / 2.0;
