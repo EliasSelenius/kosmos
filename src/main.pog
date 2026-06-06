@@ -602,7 +602,7 @@ void draw_world(DeferredRenderer* R, Camera cam) {
 
     disable_blending();
     enable_depth_test();
-    use(*gizmo_points_shader);
+    use(Shaders.gizmo_points);
     dispatch(*ambient_particles);
 
     end_frame(R);
