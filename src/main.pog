@@ -26,7 +26,7 @@ GameViewMode game_view_mode = .Tactical;
 
 DeferredRenderer renderer;
 Batch_Of_Points ambient_particles;
-Shader shader_cloud;
+Shader* shader_cloud = alloc_shader("shader/cloud.glsl");
 
 DrawBuffers db_billboard;
 
@@ -58,7 +58,7 @@ Model[..] load_models(char* name) {
         Model m = {};
         m.name = alloc_string_copy(o.name);
         m.mesh = obj_to_mesh(obj, o.indices_length, o.indices_start);
-        set_origin(m.mesh, avg_vertex_pos(m.mesh));
+        set_origin(*m.mesh, avg_vertex_pos(*m.mesh));
         gen_normals(m.mesh);
         calc_bounds(*m.mesh);
 
@@ -92,8 +92,6 @@ void load_assets() {
     kitbash_parts   = load_models("assets/kitbash.obj");
 
     // db_billboard = create_draw_buffer();
-
-    shader_cloud = load_shader("shader/cloud.glsl");
 }
 
 void on_event(AppEvent event) {
@@ -101,12 +99,7 @@ void on_event(AppEvent event) {
     switch event.kind {
         case .key_press: {
             if event.key == 'R' {
-
-                shader_reload(*renderer.shader_skybox);
-                shader_reload(*renderer.shader_dirlight);
-                shader_reload(*shader_cloud);
-
-                print("SHADER RELOAD\n");
+                reload_all_shaders();
             }
         } break;
     }
@@ -563,11 +556,12 @@ void draw_world(DeferredRenderer* R, Camera cam) {
 
     begin_light_pass(R);
 
-    enable_depth_test();
+    // enable_depth_test();
+    set_depth_mode(DepthTest.Disabled, false);
     // enable_additive_blending();
     enable_alpha_blending();
-    use(*shader_cloud);
-    set_uniform("camera_pos", player_camera.transform.position);
+    use(shader_cloud);
+    set_uniform("u_camera_pos", player_camera.transform.position);
     draw_screen_quad();
 
     if true {

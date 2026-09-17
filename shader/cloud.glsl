@@ -1,26 +1,28 @@
 
-
-IO FragData {
-    vec2 uv;
-} v2f;
-
-#include "../grax/shaders/scq.glsl"
 #include "../grax/shaders/common.glsl"
 #include "../grax/shaders/camera.glsl"
 #include "../grax/shaders/lights.glsl"
 #include "../grax/shaders/noise.glsl"
 
 
-#ifdef FragmentShader ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-uniform vec3 camera_pos;
+uniform vec3 u_camera_pos;
 
 layout(binding = 0) uniform sampler2D g_buffer_pos;
 layout(binding = 1) uniform sampler2D g_buffer_normal;
 layout(binding = 2) uniform sampler2D g_buffer_albedo;
 
-out vec4 FragColor;
 
+#ifdef VertexShader /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void main() {
+    gl_Position = screen_covering_quad(gl_VertexID);
+}
+#endif
+
+
+
+
+#ifdef FragmentShader ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+out vec4 FragColor;
 
 float density(vec3 p) {
     float d = (noise(p * 0.1) + 1.0) / 2.0;
@@ -28,33 +30,18 @@ float density(vec3 p) {
 }
 
 void main() {
+    vec2 screen_uv = gl_FragCoord.xy / ViewportSize;
+    vec2 ndc = screen_uv*2.0 - 1.0;
+    vec3 ray = camera_ray(ndc);
 
-    // TODO: paremeterize these
-    float near_plane = 0.1;
-    float far_plane = 10000.0;
-    float fov = 90.0 * deg2rad;
+    vec3 view_pos = texture(g_buffer_pos, screen_uv).xyz;
 
-    float half_near_plane_height = near_plane / tan(Half_Pi - fov / 2.0);
-    float half_near_plane_width  = half_near_plane_height * (16.0 / 9.0);
+    // discard;
 
-    vec2 ndc = v2f.uv*2.0 - vec2(1.0);
-
-    mat4 m = transpose(camera.view);
-    vec3 left    = m[0].xyz; //  vec3(m[0], m[1], m[2]);
-    vec3 up      = m[1].xyz; //  vec3(m[4], m[5], m[6]);
-    vec3 forward = m[2].xyz; //  vec3(m[8], m[9], m[10]);
-    // vec3 cam_pos = vec3(m[0][3], m[1][3], m[2][3]);
-
-
-    vec3 ray = normalize(left * ndc.x * half_near_plane_width +
-                         up * ndc.y * half_near_plane_height +
-                         forward * -near_plane);
-
-
-    discard;
+    float dist = length(view_pos);
 
     // {
-    //     vec3 o = camera_pos;
+    //     vec3 o = u_camera_pos;
     //     vec3 r = ray;
 
     //     vec3 bb = vec3(30.0);
@@ -87,11 +74,11 @@ void main() {
     // }
 
     // { // edge detection
-    //     vec3 albedo = texture(g_buffer_albedo, v2f.uv).rgb;
-    //     vec3 albedo1 = texture(g_buffer_albedo, v2f.uv + 0.002).rgb;
+    //     vec3 albedo = texture(g_buffer_albedo, screen_uv).rgb;
+    //     vec3 albedo1 = texture(g_buffer_albedo, screen_uv + 0.002).rgb;
 
-    //     vec3 normal = texture(g_buffer_normal, v2f.uv).rgb;
-    //     vec3 normal1 = texture(g_buffer_normal, v2f.uv + 0.002 * -normal.xy).rgb;
+    //     vec3 normal = texture(g_buffer_normal, screen_uv).rgb;
+    //     vec3 normal1 = texture(g_buffer_normal, screen_uv + 0.002 * -normal.xy).rgb;
 
     //     //length(albedo - albedo1) > 0.01
 
@@ -105,12 +92,12 @@ void main() {
 
 
     // {
-    //     vec3 pos = texture(g_buffer_pos, v2f.uv).xyz;
+    //     vec3 pos = texture(g_buffer_pos, screen_uv).xyz;
     //     float depth = length(pos);
     //     float traced = 0;
     //     float acc = 0;
     //     for (int i = 1; i <= 20; i++) {
-    //         vec3 p = camera_pos + ray * float(i) * 10;
+    //         vec3 p = u_camera_pos + ray * float(i) * 10;
     //         acc += density(p) * 0.05;
     //         // if (length(ray * float(i)) > depth) break;
     //     }
@@ -122,9 +109,9 @@ void main() {
     //     vec3 sphere_pos = vec3(0.0, 0.0, sphere_radius + 10);
 
     //     float dist;
-    //     if (ray_sphere_intersects(camera_pos, ray, sphere_pos, sphere_radius, dist)) {
+    //     if (ray_sphere_intersects(u_camera_pos, ray, sphere_pos, sphere_radius, dist)) {
 
-    //         vec3 point = camera_pos + ray * dist;
+    //         vec3 point = u_camera_pos + ray * dist;
     //         vec3 normal = normalize(point - sphere_pos);
 
     //         gl_FragDepth = get_fragdepth_from_world_space_point(point);
@@ -146,5 +133,4 @@ void main() {
     // }
 
 }
-
 #endif
