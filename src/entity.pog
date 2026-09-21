@@ -17,7 +17,8 @@ struct Entity {
     with Transform tr;
     with Rigidbody rb;
 
-    Model* model;
+    Mesh* mesh;
+
     Material_PBR pbr;
 
     uint32 team_id;
@@ -91,6 +92,11 @@ bool is_ancestor(Entity* ancestor, en) {
 }
 
 void set_relation(Entity* parent, child) {
+    if parent == null {
+        remove_parent(child);
+        return;
+    }
+
     if is_ancestor(parent, child) {
         print("[ERROR]: Entity cannot be parented to itself.\n");
         return;
@@ -108,8 +114,8 @@ void entity_despawn(Entity* en) {
     remove_parent(en);
     en.is_alive = false;
     if en.children {
-        for 0 .. list_length(en.children) {
-            entity_despawn(en.children[it]);
+        while list_length(en.children) {
+            entity_despawn(en.children[0]);
         }
 
         list_delete(en.children);
@@ -137,7 +143,7 @@ void entity_update(Entity* en) {
     for 0 .. list_length(projectiles) {
         let pj = projectiles[it];
         if pj.team_id == en.team_id continue;
-        let d = sphere_dist(en.tr.position, en.model.mesh.max_radius, pj.pos, 0);
+        let d = sphere_dist(en.tr.position, en.mesh.max_radius, pj.pos, 0);
         if d < 0 {
             en.hp -= 1.1;
             list_unordered_remove(projectiles, it);
@@ -155,11 +161,11 @@ void entity_update(Entity* en) {
         let p = xyz(m.row4);
 
         pj.vel = f * -10 + en.rb.velocity + random_unit_vec3() * random01() * 4;
-        pj.pos = p + f*en.model.mesh.bb_max.z;
+        pj.pos = p + f*en.mesh.bb_max.z;
         pj.life_time = 0;
         pj.team_id = en.team_id;
 
-        gizmo_sphere(transform_point(en.tr.position, get_matrix(en.parent)), en.model.mesh.max_radius, Red);
+        gizmo_sphere(transform_point(en.tr.position, get_matrix(en.parent)), en.mesh.max_radius, Red);
     }
 
     foreach_child_with_name(en, "engine", engine_thrust);
@@ -168,7 +174,7 @@ void entity_update(Entity* en) {
     if en.team_id != player_spaceship.team_id {
         vec2 mi;
         vec2 mx;
-        if arcndc_rect_of(player_camera, matrix, en.model.mesh.bb_min, en.model.mesh.bb_max, *mi, *mx) {
+        if arcndc_rect_of(player_camera, matrix, en.mesh.bb_min, en.mesh.bb_max, *mi, *mx) {
             anchor = .bottom_left;
             // draw_rect(mi, mx - mi, opacity(White, 0.4));
 
@@ -208,7 +214,7 @@ void entity_update(Entity* en) {
     }
 
 
-    // gizmo_sphere(en.tr.position, en.model.mesh.max_radius, Green);
+    // gizmo_sphere(en.tr.position, en.mesh.max_radius, Green);
 }
 
 void comp_fire_gun(Entity* en) {
@@ -218,7 +224,7 @@ void comp_fire_gun(Entity* en) {
 void foreach_child_with_name(Entity* en, char* name, void(Entity*) callback) {
     if en.children for 0 .. list_length(en.children) {
         let c = en.children[it];
-        if string_equals(c.model.name, name) callback(c);
+        if string_equals(c.mesh.name, name) callback(c);
         foreach_child_with_name(c, name, callback);
     }
 }
@@ -233,7 +239,7 @@ void fire_gun(Entity* en) {
     let p = xyz(m.row4);
 
     pj.vel = f*600 + en.rb.velocity + random_unit_vec3() * random01() * 10;
-    pj.pos = p + f*en.model.mesh.bb_max.z;
+    pj.pos = p + f*en.mesh.bb_max.z;
     pj.life_time = 0;
     pj.team_id = en.team_id;
 

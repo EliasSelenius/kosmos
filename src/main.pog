@@ -32,70 +32,52 @@ DrawBuffers db_billboard;
 
 RenderLayer static_ui;
 
-Model model_SpaceShip;
-Model[..] kitbash_parts;
+Mesh* model_SpaceShip;
+Mesh*[..] kitbash_parts;
 
-Model* get_kitbash_model(char* name) {
-    for 0 .. list_length(kitbash_parts) {
-        let m = *kitbash_parts[it];
-        if string_equals(m.name, name) return m;
-    }
-    return null;
-}
-
-struct Model {
-    string name;
-    Mesh mesh;
-    DrawBuffers db;
-}
-
-Model[..] load_models(char* name) {
+Mesh*[..] load_meshes(char* name) {
     let obj = load_obj(name);
-    Model[..] models = list_create(sizeof Model);
+    Mesh*[..] meshes = list_create(sizeof Mesh*);
 
     for 0 .. list_length(obj.objects) {
         let o = *obj.objects[it];
-        Model m = {};
-        m.name = alloc_string_copy(o.name);
-        m.mesh = obj_to_mesh(obj, o.indices_length, o.indices_start);
-        set_origin(*m.mesh, avg_vertex_pos(*m.mesh));
-        gen_normals(m.mesh);
-        calc_bounds(*m.mesh);
 
-        m.db = create_draw_buffers(m.mesh);
+        Mesh* mesh = mesh_alloc();
+        mesh.name = alloc_string_copy(o.name);
 
-        list_add(*models, *m);
+        obj_to_mesh(obj, mesh, o.indices_length, o.indices_start);
+
+        set_origin(mesh, avg_vertex_pos(mesh));
+        gen_normals(mesh);
+        calc_bounds(mesh);
+
+        list_add(*meshes, *mesh);
     }
 
     free_obj(obj);
-    return models;
+    return meshes;
 }
 
-Model load_model(char* name) {
-    Model m = {};
-    m.name = make_string(name);
+Mesh* load_mesh(char* name) {
+    Mesh* mesh = mesh_alloc();
+    mesh.name = make_string(name);
 
     let obj = load_obj(name);
-    m.mesh = obj_to_mesh(obj);
+    obj_to_mesh(obj, mesh);
     free_obj(obj);
 
-    gen_normals(m.mesh);
-    calc_bounds(*m.mesh);
+    gen_normals(mesh);
+    calc_bounds(mesh);
 
-    m.db = create_draw_buffers(m.mesh);
-
-    return m;
+    return mesh;
 }
 
 void load_assets() {
-    model_SpaceShip = load_model("../shared_assets/space/SpaceShip.obj");
-    kitbash_parts   = load_models("assets/kitbash.obj");
-
-    // db_billboard = create_draw_buffer();
+    model_SpaceShip = load_mesh("../shared_assets/space/SpaceShip.obj");
+    kitbash_parts   = load_meshes("assets/kitbash.obj");
 }
 
 void on_event(AppEvent event) {
-
     switch event.kind {
         case .key_press: {
             if event.key == 'R' {
@@ -105,14 +87,14 @@ void on_event(AppEvent event) {
     }
 }
 
-Entity* add_component(Entity* ship, Model* model, vec3 pos, normal) {
+Entity* add_component(Entity* ship, Mesh* mesh, vec3 pos, normal) {
     let comp = entity_spawn();
     comp.team_id = ship.team_id;
     comp.parent = ship;
     if ship.children == null  ship.children = list_create(sizeof Entity*);
     list_add(*ship.children, *comp);
 
-    comp.model = model;
+    comp.mesh = mesh;
     set_tr(comp, pos, normal);
     return comp;
 }
@@ -148,7 +130,7 @@ void main() {
     immediate_layer = *static_ui;
 
     player_spaceship = entity_spawn();
-    player_spaceship.model = *model_SpaceShip;
+    player_spaceship.mesh = model_SpaceShip;
 
     player_camera.transform.position = { 20, 30, 0 };
 
@@ -185,7 +167,7 @@ void main() {
     int32 seed = 0;
     for 0 .. 3 {
         let en = entity_spawn();
-        en.model = *model_SpaceShip;
+        en.mesh = model_SpaceShip;
         en.tr.position = { random(seed++), random(seed++), random(seed++) } * 100;
     }
 
@@ -202,30 +184,6 @@ void main() {
             case .World: {
 
                 player_control(player_spaceship, dt);
-
-                // {
-                //     let en = player_spaceship;
-
-                //     camera_orbit_control(*player_camera, en.tr);
-
-                //     mat4 m = to_matrix(en.tr);
-                //     let forward = xyz(m.row3);
-                //     let left    = xyz(m.row1);
-                //     let up      = xyz(m.row2);
-
-                //     let force = forward * key(GLFW_KEY_LEFT_SHIFT);
-                //     add_force(*en.rb, force);
-
-                //     if key(GLFW_KEY_LEFT_ALT) {
-                //     } else {
-                //         vec3 input = { -Input.wasd.y, 0, -Input.wasd.x };
-                //         add_torque(*en.rb, noz(input * make_mat3(m)) * 2 * dt);
-                //     }
-
-                //     if mouse(Left_Mouse) {
-                //         comp_fire_gun(en);
-                //     }
-                // }
 
                 draw_world(R, player_camera);
                 update_world();
@@ -267,90 +225,8 @@ void main() {
             } break;
 
             case .ShipBuilder: {
-                let ship = player_spaceship;
-                ship.mirror_entity = ship;
-
-                draw_hierarchy(make_vec(-1, 0.95), ship);
-
-                camera_orbit_control(*player_camera, ship.tr.position);
-
                 R.sun_dir = neg(forward(player_camera.transform));
-
-                draw_lines_to_children(ship);
-
-                static Entity* selection;
-                let rayres = raycast_recursive(ship, selection);
-                let part = part_selection_menu();
-                if part {
-                    selection = add_component(ship, part, rayres.point, rayres.normal);
-                    vec3 mirror = {-1, 1, 1};
-                    selection.mirror_entity = add_component(ship, part, rayres.point * mirror, rayres.normal * mirror);
-                    selection.mirror_entity.mirror_entity = selection;
-                }
-
-                if selection {
-                    selection.pbr.albedo = {1, 0.1, 0.1};
-                    if mouse(Left_Mouse) {
-
-                        let snap = get_snap_point(player_camera.transform.position, camera_ray(player_camera, Input.mouse_pos), ship, selection);
-                        if snap.en and snap.en != selection {
-                            set_relation(snap.en, selection);
-                            selection.tr.position = snap.lpos;
-                            selection.tr.rotation = quat_identity;
-
-                            if selection.mirror_entity and snap.en.mirror_entity {
-                                set_relation(snap.en.mirror_entity, selection.mirror_entity);
-                                selection.mirror_entity.tr.position = snap.lpos;
-                                selection.mirror_entity.tr.rotation = quat_identity;
-                            }
-                        } else {
-                            if rayres.tri_index != -1 {
-                                set_relation(rayres.en, selection);
-                                set_tr(selection, rayres.point, rayres.normal);
-                                vec3 mirror = {-1, 1, 1};
-                                if selection.mirror_entity and rayres.en.mirror_entity {
-                                    set_relation(rayres.en.mirror_entity, selection.mirror_entity);
-                                    set_tr(selection.mirror_entity, rayres.point * mirror, rayres.normal * mirror);
-                                }
-                            } else {
-
-                                let im = to_inverse_matrix(ship.tr);
-                                update_matrices(*player_camera);
-                                vec3 o = xyz(make_vec(player_camera.transform.position, 1.0) * im);
-                                vec3 d = xyz(make_vec(camera_ray(player_camera, Input.mouse_pos), 0.0) * im);
-                                selection.tr.position = o + d*30;
-                            }
-                        }
-
-                    } else {
-                        if rayres.tri_index == -1 {
-                            if selection.mirror_entity entity_despawn(selection.mirror_entity);
-                            entity_despawn(selection);
-                        }
-                        selection.pbr = default_material;
-                        selection = null;
-                    }
-                } else {
-                    if rayres.en and rayres.en != ship {
-                        if mouse_pressed(Left_Mouse) {
-                            selection = rayres.en;
-
-                        }
-
-                        rayres.en.tr.scale = rayres.en.tr.scale + vec3_one * Input.mouse_scroll * 0.05;
-                    }
-
-                    if rayres.tri_index != -1 {
-                        vec3 normal = rayres.normal;
-                        let point = rayres.point;
-
-                        let m = get_matrix(rayres.en);
-                        vec3 wpos = xyz(make_vec(point, 1.0) * m);
-                        vec3 wnormal = normalize(normal * make_mat3(m));
-                        gizmo_point(wpos, Purple);
-                        gizmo_line(wpos, wpos + wnormal, Yellow);
-                    }
-                }
+                ship_builder();
 
                 draw_world(R, player_camera);
                 update_world();
@@ -365,14 +241,97 @@ void main() {
     }
 }
 
-Model* part_selection_menu() {
-    Model* res = null;
+void ship_builder() {
+    let ship = player_spaceship;
+    ship.mirror_entity = ship;
+
+    draw_hierarchy(make_vec(-1, 0.95), ship);
+
+    camera_orbit_control(*player_camera, ship.tr.position);
+
+    draw_lines_to_children(ship);
+
+    update_matrices(*player_camera);
+    vec3 o = player_camera.transform.position;
+    vec3 d = camera_ray(player_camera, Input.mouse_pos);
+
+    static Entity* selection;
+    let rayres = raycast_recursive(ship, selection);
+    let part = part_selection_menu();
+    if part {
+        selection = add_component(ship, part, rayres.point, rayres.normal);
+        vec3 mirror = {-1, 1, 1};
+        selection.mirror_entity = add_component(ship, part, rayres.point * mirror, rayres.normal * mirror);
+        selection.mirror_entity.mirror_entity = selection;
+    }
+
+    void placepart(Entity* parent, part, vec3 point, normal) {
+        set_relation(parent, part);
+        set_tr(part, point, normal);
+
+        vec3 mirror = {-1, 1, 1};
+        if part.mirror_entity and parent.mirror_entity {
+            set_relation(parent.mirror_entity, part.mirror_entity);
+            set_tr(part.mirror_entity, point * mirror, normal * mirror);
+        }
+    }
+
+    if selection {
+        selection.pbr.albedo = {1, 0.1, 0.1};
+
+        if mouse(Left_Mouse) {
+
+            let snap = get_snap_point(o, d, ship, selection);
+            if snap.en and snap.en != selection {
+                placepart(snap.en, selection, snap.lpos, vec3_unit_y);
+
+            } else if rayres.tri_index != -1 {
+                placepart(rayres.en, selection, rayres.point, rayres.normal);
+
+            } else {
+                set_relation(null, selection);
+                selection.tr.position = o + d*30;
+            }
+
+        } else {
+            if selection.parent == null {
+                if selection.mirror_entity entity_despawn(selection.mirror_entity);
+                entity_despawn(selection);
+            }
+            selection.pbr = default_material;
+            selection = null;
+        }
+    } else {
+        if rayres.en and rayres.en != ship {
+            if mouse_pressed(Left_Mouse) {
+                selection = rayres.en;
+
+            }
+
+            // rayres.en.tr.scale = rayres.en.tr.scale + vec3_one * Input.mouse_scroll * 0.05;
+        }
+
+        if rayres.tri_index != -1 {
+            vec3 normal = rayres.normal;
+            let point = rayres.point;
+
+            let m = get_matrix(rayres.en);
+            vec3 wpos = xyz(make_vec(point, 1.0) * m);
+            vec3 wnormal = normalize(normal * make_mat3(m));
+            gizmo_point(wpos, Purple);
+            gizmo_line(wpos, wpos + wnormal, Yellow);
+        }
+    }
+}
+
+Mesh* part_selection_menu() {
+    Mesh* res = null;
 
     float32 glyph_height = 0.05;
 
     anchor = .top_left;
     for 0 .. list_length(kitbash_parts) {
-        let m = *kitbash_parts[it];
+        let m = kitbash_parts[it];
         vec2 pos = app.top_left + make_vec(0.1, -glyph_height * it -0.1);
         vec2 size = { glyph_height / 2.0 * m.name.length, -glyph_height };
         let a = pos;
@@ -392,7 +351,7 @@ float32 draw_hierarchy(vec2 pos, Entity* en) {
     float32 glyph_height = 0.05;
 
     float32 start_y = pos.y;
-    draw_text(pos, glyph_height, en.model.name, White);
+    draw_text(pos, glyph_height, en.mesh.name, White);
     pos.x += glyph_height;
     if en.children for 0 .. list_length(en.children) {
         let child = en.children[it];
@@ -416,21 +375,21 @@ SnapPoint get_snap_point(vec3 o,d, Entity* en, exclude) {
     SnapPoint s = {};
     s.en = en;
 
-    vec3 back  = transform_point(make_vec(0,0,en.model.mesh.bb_min.z), m);
-    vec3 front = transform_point(make_vec(0,0,en.model.mesh.bb_max.z), m);
+    vec3 back  = transform_point(make_vec(0,0,en.mesh.bb_min.z), m);
+    vec3 front = transform_point(make_vec(0,0,en.mesh.bb_max.z), m);
 
     gizmo_point(back, Cyan);
     gizmo_point(front, Cyan);
 
     float32 dist;
     if ray_sphere_intersects(o,d, back, 0.3, *dist) {
-        s.lpos = make_vec(0,0,en.model.mesh.bb_min.z);
+        s.lpos = make_vec(0,0,en.mesh.bb_min.z);
         s.wpos = back;
         return s;
     }
 
     if ray_sphere_intersects(o,d, front, 0.3, *dist) {
-        s.lpos = make_vec(0,0,en.model.mesh.bb_max.z);
+        s.lpos = make_vec(0,0,en.mesh.bb_max.z);
         s.wpos = front;
         return s;
     }
@@ -511,10 +470,10 @@ void draw_world(DeferredRenderer* R, Camera cam) {
 
     for 0 .. entities_count {
         let en = *entities[it];
-        if !en.is_alive continue;
-
-        let data = instdata(get_matrix(en), en.pbr, *white_texture);
-        mesh_batch(*en.model.mesh, data);
+        if en.is_alive and en.mesh {
+            let data = instdata(get_matrix(en), en.pbr, *white_texture);
+            mesh_batch(en.mesh, data);
+        }
     }
 
     // for 0 .. asteroid_count {
@@ -689,7 +648,7 @@ RaycastResult raycast(Entity* en) {
     vec3 o = player_camera.transform.position;
     vec3 d = camera_ray(player_camera, Input.mouse_pos);
 
-    let result = mesh_raycast(*en.model.mesh, im, o, d);
+    let result = mesh_raycast(en.mesh, im, o, d);
 
     RaycastResult res = {};
     res.en = en;
