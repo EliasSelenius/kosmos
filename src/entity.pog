@@ -113,6 +113,7 @@ void entity_despawn(Entity* en) {
         }
 
         list_delete(en.children);
+        en.children = null;
     }
 }
 

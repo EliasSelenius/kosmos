@@ -499,18 +499,35 @@ void draw_world(DeferredRenderer* R, Camera cam) {
 
     begin_geometry_pass(R, cam);
 
+    InstanceData instdata(mat4 matrix, Material_PBR mat, Texture2D* tex) {
+        InstanceData data = {};
+        data.model              = matrix;
+        data.uv_offset_scale    = make_vec(vec2_zero, vec2_one);
+        data.albedo_color       = make_vec(mat.albedo, 1.0);
+        data.metallic_roughness = make_vec(mat.metallic, mat.roughness);
+        data.albedo_texture     = ensure_texture_handle(tex);
+        return data;
+    }
+
     for 0 .. entities_count {
         let en = *entities[it];
         if !en.is_alive continue;
 
-        let matrix = get_matrix(en);
-        draw_geometry(R, en.model.db, en.pbr, matrix);
+        let data = instdata(get_matrix(en), en.pbr, *white_texture);
+        mesh_batch(*en.model.mesh, data);
     }
 
-    for 0 .. asteroid_count {
-        Asteroid* a = *asteroids[it];
-        draw_geometry(R, a.mc.db, to_matrix(a.tr));
-    }
+    // for 0 .. asteroid_count {
+    //     Asteroid* a = *asteroids[it];
+    //     draw_geometry(R, a.mc.db, to_matrix(a.tr));
+    // }
+
+    Mesh* astmesh = *asteroids[0].mc.mesh;
+    Material_PBR astmat = {
+        albedo = {1, 1, 1},
+        metallic = 0.1,
+        roughness = 0.1
+    };
 
     {
         float32 size = 400;
@@ -524,9 +541,13 @@ void draw_world(DeferredRenderer* R, Camera cam) {
             let i = make_ivec(p);
             int32 seed = i.x*18 + i.z*57;
             vec3 ofs = {random01(seed++), random01(seed++), random01(seed++)} * {size, 50, size};
-            draw_geometry(R, db, make_mat4(p + ofs, 4));
+            let data = instdata(make_mat4(p + ofs, 4), astmat, *white_texture);
+            mesh_batch(astmesh, data);
+            // draw_geometry(R, db, make_mat4(p + ofs, 4));
         }
     }
+
+    batch_end(false);
 
     // this is framebuffer read test
     // if mouse_pressed(Left_Mouse) {
@@ -556,13 +577,16 @@ void draw_world(DeferredRenderer* R, Camera cam) {
 
     begin_light_pass(R);
 
-    // enable_depth_test();
-    set_depth_mode(DepthTest.Disabled, false);
-    // enable_additive_blending();
-    enable_alpha_blending();
-    use(shader_cloud);
-    set_uniform("u_camera_pos", player_camera.transform.position);
-    draw_screen_quad();
+    {
+        // enable_depth_test();
+        set_depth_mode(DepthTest.Disabled, false);
+        // enable_additive_blending();
+        enable_alpha_blending();
+        use(shader_cloud);
+        set_uniform("u_camera_pos", player_camera.transform.position);
+        draw_screen_quad();
+    }
+
 
     if true {
         float32 size = 10;
@@ -662,41 +686,18 @@ RaycastResult raycast(Entity* en) {
     let im = get_inverse_matrix(en);
 
     update_matrices(*player_camera);
-    vec3 o = xyz(make_vec(player_camera.transform.position, 1.0) * im);
-    vec3 d = xyz(make_vec(camera_ray(player_camera, Input.mouse_pos), 0.0) * im);
+    vec3 o = player_camera.transform.position;
+    vec3 d = camera_ray(player_camera, Input.mouse_pos);
+
+    let result = mesh_raycast(*en.model.mesh, im, o, d);
 
     RaycastResult res = {};
     res.en = en;
-    res.tri_index = -1;
-    res.point = vec3_zero;
-    res.normal = vec3_unit_y;
-    res.sqdist = 10_000_000;
-
-    int32 i = 0;
-    while i < list_length(en.model.mesh.indices) {
-        vec3 p1 = en.model.mesh.vertices[en.model.mesh.indices[i+0]].pos;
-        vec3 p2 = en.model.mesh.vertices[en.model.mesh.indices[i+1]].pos;
-        vec3 p3 = en.model.mesh.vertices[en.model.mesh.indices[i+2]].pos;
-
-        vec3 p;
-        if ray_triangle_intersects(o,d, p1, p2, p3, *p) {
-            let s = sqdist(o, p);
-            if s < res.sqdist {
-                res.sqdist = s;
-                res.tri_index = i;
-                res.point = p;
-            }
-        }
-
-        i += 3;
-    }
-
-    if res.tri_index != -1 {
-        vec3 p1 = en.model.mesh.vertices[en.model.mesh.indices[res.tri_index+0]].pos;
-        vec3 p2 = en.model.mesh.vertices[en.model.mesh.indices[res.tri_index+1]].pos;
-        vec3 p3 = en.model.mesh.vertices[en.model.mesh.indices[res.tri_index+2]].pos;
-        res.normal = normalize(cross(p2 - p1, p3 - p1));
-    }
+    res.tri_index = result.tri_index;
+    res.point     = result.hit_point;
+    res.normal    = result.normal;
+    res.sqdist    = result.sqdist;
 
     return res;
 }
+
