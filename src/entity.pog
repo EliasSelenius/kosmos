@@ -79,6 +79,30 @@ Entity* entity_spawn() {
     return en;
 }
 
+Entity* entity_clone(Entity* en) {
+    Entity* newen(Entity* en) {
+        let cl = entity_spawn();
+        @cl = @en;
+        cl.children = null;
+        cl.mirror_entity = null;
+        cl.parent = null;
+        return cl;
+    }
+
+    let cl = newen(en);
+
+    // set_relation(en.parent, cl);
+
+    if en.children {
+        for 0 .. list_length(en.children) {
+            let child = entity_clone(en.children[it]);
+            set_relation(cl, child);
+        }
+    }
+
+    return cl;
+}
+
 void remove_parent(Entity* en) {
     if en.parent == null return;
     list_remove(en.parent.children, *en);
@@ -111,8 +135,11 @@ void set_relation(Entity* parent, child) {
 }
 
 void entity_despawn(Entity* en) {
+    if en == null return;
+
     remove_parent(en);
     en.is_alive = false;
+
     if en.children {
         while list_length(en.children) {
             entity_despawn(en.children[0]);
